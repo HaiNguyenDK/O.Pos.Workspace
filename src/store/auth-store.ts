@@ -21,8 +21,17 @@ export const useAuthStore = create<AuthState>((set) => ({
   hydrated: false,
 
   async hydrate() {
-    const token = await SecureStore.getItemAsync(TOKEN_KEY);
-    set({ token, hydrated: true });
+    // Timeout chống treo: nếu SecureStore không phản hồi (một số máy Sunmi/keystore
+    // chậm), vẫn coi như hydrated để app không kẹt splash.
+    try {
+      const token = await Promise.race<string | null>([
+        SecureStore.getItemAsync(TOKEN_KEY),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+      ]);
+      set({ token: token ?? null, hydrated: true });
+    } catch {
+      set({ token: null, hydrated: true });
+    }
   },
 
   async loginWithPin(pin: string) {

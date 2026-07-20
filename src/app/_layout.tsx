@@ -4,7 +4,7 @@ import '@/lib/i18n';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
@@ -26,17 +26,23 @@ const queryClient = new QueryClient({
 
 export default function RootLayout() {
   const hydrate = useAuthStore((s) => s.hydrate);
-  const [ready, setReady] = useState(false);
+  const hydrated = useAuthStore((s) => s.hydrated);
 
   useEffect(() => {
-    hydrate().finally(() => {
-      setReady(true);
-      SplashScreen.hideAsync();
-    });
+    hydrate();
   }, [hydrate]);
 
-  if (!ready) return null;
+  // Ẩn splash khi hydrate xong; fallback 2.5s để KHÔNG BAO GIỜ kẹt splash.
+  useEffect(() => {
+    if (hydrated) {
+      SplashScreen.hideAsync().catch(() => {});
+      return;
+    }
+    const t = setTimeout(() => SplashScreen.hideAsync().catch(() => {}), 2500);
+    return () => clearTimeout(t);
+  }, [hydrated]);
 
+  // LUÔN mount navigator (không gate bằng return null → tránh treo splash).
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
