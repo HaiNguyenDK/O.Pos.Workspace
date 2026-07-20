@@ -17,7 +17,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.posmobile"
     },
     "web": {
       "output": "static",
@@ -34,7 +35,19 @@
         }
       ],
       "expo-localization",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Cho phép dùng camera để quét mã QR bàn."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#F37021"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

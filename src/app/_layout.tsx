@@ -14,9 +14,11 @@ import Toast from 'react-native-toast-message';
 import { toastConfig } from '@/lib/toast';
 
 import { navTheme } from '@/lib/theme';
+import { setupOnlineManager } from '@/lib/connectivity';
 import { useAuthStore } from '@/store/auth-store';
 
 SplashScreen.preventAutoHideAsync();
+setupOnlineManager();
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },

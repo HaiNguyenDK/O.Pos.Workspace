@@ -1,0 +1,28 @@
+-- Merging decision tree log ---
+manifest
+ADDED from C:\Home\pos-workspace\pos-mobile\modules\sunmi-printer\android\src\main\AndroidManifest.xml:1:1-9:12
+INJECTED from C:\Home\pos-workspace\pos-mobile\modules\sunmi-printer\android\src\main\AndroidManifest.xml:1:1-9:12
+	package
+		INJECTED from C:\Home\pos-workspace\pos-mobile\modules\sunmi-printer\android\src\main\AndroidManifest.xml
+	xmlns:android
+		ADDED from C:\Home\pos-workspace\pos-mobile\modules\sunmi-printer\android\src\main\AndroidManifest.xml:1:11-69
+queries
+ADDED from C:\Home\pos-workspace\pos-mobile\modules\sunmi-printer\android\src\main\AndroidManifest.xml:3:3-8:13
+package#woyou.aidlservice.jiuiv5
+ADDED from C:\Home\pos-workspace\pos-mobile\modules\sunmi-printer\android\src\main\AndroidManifest.xml:4:5-56
+	android:name
+		ADDED from C:\Home\pos-workspace\pos-mobile\modules\sunmi-printer\android\src\main\AndroidManifest.xml:4:14-53
+intent#action:name:woyou.aidlservice.jiuiv5.IWoyouService
+ADDED from C:\Home\pos-workspace\pos-mobile\modules\sunmi-printer\android\src\main\AndroidManifest.xml:5:5-7:14
+action#woyou.aidlservice.jiuiv5.IWoyouService
+ADDED from C:\Home\pos-workspace\pos-mobile\modules\sunmi-printer\android\src\main\AndroidManifest.xml:6:7-71
+	android:name
+		ADDED from C:\Home\pos-workspace\pos-mobile\modules\sunmi-printer\android\src\main\AndroidManifest.xml:6:15-68
+uses-sdk
+INJECTED from C:\Home\pos-workspace\pos-mobile\modules\sunmi-printer\android\src\main\AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from C:\Home\pos-workspace\pos-mobile\modules\sunmi-printer\android\src\main\AndroidManifest.xml
+INJECTED from C:\Home\pos-workspace\pos-mobile\modules\sunmi-printer\android\src\main\AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from C:\Home\pos-workspace\pos-mobile\modules\sunmi-printer\android\src\main\AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from C:\Home\pos-workspace\pos-mobile\modules\sunmi-printer\android\src\main\AndroidManifest.xml

@@ -7,9 +7,11 @@ import { ChevronLeft, ShoppingCart } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
 import { MenuItemCard } from '@/components/ui/menu-item-card';
 import { ModifierSheet, type ModifierSheetHandle } from '@/components/sheets/modifier-sheet';
+import { ErrorState } from '@/components/ui/error-state';
 import { useMenu } from '@/data/queries';
 import { color } from '@/lib/theme';
 import { formatMoney } from '@/lib/format';
+import { haptics } from '@/lib/haptics';
 import { toast } from '@/lib/toast';
 import { useCartStore } from '@/store/cart-store';
 import { useOrderStore } from '@/store/order-store';
@@ -35,6 +37,7 @@ export default function Menu() {
   const qtyOf = (id: string) => lines.filter((l) => l.menuItemId === id).reduce((n, l) => n + l.quantity, 0);
 
   const quickAdd = (item: MenuItem) => {
+    haptics.light();
     addItem(item, 1);
     toast.success('Đã thêm', item.name);
   };
@@ -80,6 +83,8 @@ export default function Menu() {
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color={color.brand.DEFAULT} />
         </View>
+      ) : menu.isError ? (
+        <ErrorState onRetry={() => menu.refetch()} />
       ) : (
         <FlatList
           data={items}
@@ -115,6 +120,7 @@ export default function Menu() {
       )}
 
       <ModifierSheet ref={modifier} onAdd={(item, qty, note) => {
+        haptics.light();
         addItem(item, qty, note);
         toast.success('Đã thêm', `${item.name} ×${qty}`);
       }} />

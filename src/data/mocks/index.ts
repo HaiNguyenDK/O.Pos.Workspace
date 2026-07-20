@@ -153,6 +153,51 @@ export const bills: Bill[] = [
     paymentMethod: 'cash',
     paidAt: '2026-07-20T09:50:00.000Z',
   },
+  {
+    id: 'b2', code: 'HD-0010', orderId: 'o10', customerName: 'Anh Minh', tableName: 'Bàn 3', tableCode: 't3',
+    items: [{ menuItemId: 'm1', name: 'Phở bò tái', price: 65000, quantity: 3 }],
+    subtotal: 195000, tax: 19500, total: 214500, paymentMethod: 'qr', paidAt: '2026-07-20T10:05:00.000Z',
+  },
+  {
+    id: 'b3', code: 'HD-0011', orderId: 'o11', customerName: 'Chị Lan', tableName: 'VIP 1', tableCode: 't7',
+    items: [{ menuItemId: 'm2', name: 'Cơm gà xối mỡ', price: 55000, quantity: 4 }, { menuItemId: 'm5', name: 'Cà phê sữa đá', price: 25000, quantity: 4 }],
+    subtotal: 320000, tax: 32000, total: 352000, paymentMethod: 'card', paidAt: '2026-07-20T10:22:00.000Z',
+  },
+  {
+    id: 'b4', code: 'HD-0012', orderId: 'o12', customerName: 'Khách lẻ', tableName: 'Bàn 6', tableCode: 't6',
+    items: [{ menuItemId: 'm4', name: 'Trà đào cam sả', price: 30000, quantity: 2 }, { menuItemId: 'm6', name: 'Bánh flan', price: 20000, quantity: 3 }],
+    subtotal: 120000, tax: 12000, total: 132000, paymentMethod: 'cash', paidAt: '2026-07-20T10:35:00.000Z',
+  },
+  {
+    id: 'b5', code: 'HD-0013', orderId: 'o13', customerName: 'Anh Tú', tableName: 'Bàn 2', tableCode: 't2',
+    items: [{ menuItemId: 'm3', name: 'Gỏi cuốn', price: 35000, quantity: 2 }],
+    subtotal: 70000, tax: 7000, total: 77000, paymentMethod: 'qr', paidAt: '2026-07-20T10:48:00.000Z',
+  },
+  {
+    id: 'b6', code: 'HD-0014', orderId: 'o14', customerName: 'Chị Hoa', tableName: 'Sân vườn', tableCode: 't5',
+    items: [{ menuItemId: 'm1', name: 'Phở bò tái', price: 65000, quantity: 2 }, { menuItemId: 'm4', name: 'Trà đào cam sả', price: 30000, quantity: 2 }],
+    subtotal: 190000, tax: 19000, total: 209000, paymentMethod: 'ewallet', paidAt: '2026-07-20T11:02:00.000Z',
+  },
+  {
+    id: 'b7', code: 'HD-0015', orderId: 'o15', customerName: 'Khách lẻ', tableName: 'Bàn 4', tableCode: 't4',
+    items: [{ menuItemId: 'm5', name: 'Cà phê sữa đá', price: 25000, quantity: 6 }],
+    subtotal: 150000, tax: 15000, total: 165000, paymentMethod: 'cash', paidAt: '2026-07-20T11:15:00.000Z',
+  },
+  {
+    id: 'b8', code: 'HD-0016', orderId: 'o16', customerName: 'Anh Bảo', tableName: 'VIP 2', tableCode: 't8',
+    items: [{ menuItemId: 'm2', name: 'Cơm gà xối mỡ', price: 55000, quantity: 5 }, { menuItemId: 'm6', name: 'Bánh flan', price: 20000, quantity: 5 }],
+    subtotal: 375000, tax: 37500, total: 412500, paymentMethod: 'card', paidAt: '2026-07-20T11:28:00.000Z',
+  },
+  {
+    id: 'b9', code: 'HD-0017', orderId: 'o17', customerName: 'Chị Mai', tableName: 'Bàn 1', tableCode: 't1',
+    items: [{ menuItemId: 'm3', name: 'Gỏi cuốn', price: 35000, quantity: 3 }, { menuItemId: 'm4', name: 'Trà đào cam sả', price: 30000, quantity: 3 }],
+    subtotal: 195000, tax: 19500, total: 214500, paymentMethod: 'qr', paidAt: '2026-07-20T11:40:00.000Z',
+  },
+  {
+    id: 'b10', code: 'HD-0018', orderId: 'o18', customerName: 'Khách lẻ', tableName: 'Bàn 3', tableCode: 't3',
+    items: [{ menuItemId: 'm1', name: 'Phở bò tái', price: 65000, quantity: 1 }],
+    subtotal: 65000, tax: 6500, total: 71500, paymentMethod: 'cash', paidAt: '2026-07-20T11:52:00.000Z',
+  },
 ];
 
 export const notifications: AppNotification[] = [

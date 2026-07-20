@@ -1,4 +1,5 @@
 // Màn 5 — Giỏ: dòng đã gửi (read-only) + dòng mới (sửa qty/note/huỷ), move/merge, gửi bếp.
+import { onlineManager } from '@tanstack/react-query';
 import { Redirect, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useRef } from 'react';
@@ -15,8 +16,10 @@ import { calcTotal } from '@/domain/pricing';
 import { formatMoney } from '@/lib/format';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
+import { haptics } from '@/lib/haptics';
 import { useCartStore } from '@/store/cart-store';
 import { useOrderStore } from '@/store/order-store';
+import { useOfflineQueueStore } from '@/store/offline-queue-store';
 import type { OrderLine } from '@/data/types';
 
 /** Gộp dòng theo menuItemId|note để tạo danh sách items đầy đủ gửi bếp. */
@@ -49,6 +52,7 @@ export default function Cart() {
   const sendToKitchen = useSendToKitchen();
   const moveTable = useMoveTable();
   const mergeTables = useMergeTables();
+  const enqueueOffline = useOfflineQueueStore((st) => st.enqueue);
 
   if (!active) return <Redirect href="/(app)/home" />;
 
@@ -57,15 +61,28 @@ export default function Cart() {
   const hasNew = lines.length > 0;
 
   const send = () => {
+    // Mất mạng → xếp hàng đợi (persist), gửi bếp khi có mạng lại (offline queue P1).
+    if (!onlineManager.isOnline()) {
+      haptics.warning();
+      enqueueOffline({ orderId: active.orderId, tableName: active.tableName, lines: allLines });
+      setSentLines(allLines);
+      clearCart();
+      toast.info('Đã lưu offline', 'Sẽ tự gửi bếp khi có mạng lại');
+      return;
+    }
     sendToKitchen.mutate(
       { orderId: active.orderId, lines: allLines },
       {
         onSuccess: (order) => {
+          haptics.success();
           setSentLines(order.items);
           clearCart();
           toast.success('Đã gửi bếp', `${order.items.length} món · ${active.tableName ?? 'Mang về'}`);
         },
-        onError: (e) => toast.error(t('common.error'), (e as Error).message),
+        onError: (e) => {
+          haptics.error();
+          toast.error(t('common.error'), (e as Error).message);
+        },
       }
     );
   };

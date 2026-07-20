@@ -1,12 +1,14 @@
 // Màn 11 — thành công: tóm tắt + in/email/sms/e-invoice. In gọi printer stub (D2 — thật ở Sprint 3).
 import { Redirect, useRouter } from 'expo-router';
+import { useEffect } from 'react';
 import { CheckCircle2, Mail, MessageSquare, Printer, ReceiptText } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
 import { calcTotal } from '@/domain/pricing';
-import { printer } from '@/native/printer';
+import { printReceipt } from '@/native/printer';
 import { formatMoney } from '@/lib/format';
+import { haptics } from '@/lib/haptics';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useBillStore } from '@/store/bill-store';
@@ -23,6 +25,10 @@ export default function PaymentSuccess() {
   const clearOrder = useOrderStore((s) => s.clear);
   const clearCart = useCartStore((s) => s.clear);
   const bill = useBillStore();
+
+  useEffect(() => {
+    haptics.success();
+  }, []);
 
   if (!active || items.length === 0) return <Redirect href="/(app)/home" />;
 
@@ -58,8 +64,11 @@ export default function PaymentSuccess() {
   };
 
   const doPrint = async () => {
-    await printer.printReceipt(receipt);
-    toast.info('Máy in chưa cấu hình', 'Đã log hoá đơn (stub) — sẽ in thật ở Sprint 3');
+    const res = await printReceipt(receipt);
+    if (res.printed) toast.success('Đã in hoá đơn', receipt.code);
+    else if (res.reason === 'unsupported') toast.info('Không có máy in Sunmi', 'Chạy trên Sunmi V2s để in giấy');
+    else if (res.reason === 'not_connected') toast.error('Máy in chưa kết nối', 'Kiểm tra dịch vụ in của Sunmi');
+    else toast.error('In lỗi', 'Vui lòng thử lại');
   };
 
   return (

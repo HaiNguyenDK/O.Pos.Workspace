@@ -4,10 +4,11 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, FlatList, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Bell } from 'lucide-react-native';
+import { Bell, ScanLine, Settings as SettingsIcon } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
 import { TableCard } from '@/components/ui/table-card';
 import { OrderRow } from '@/components/ui/order-row';
+import { ErrorState } from '@/components/ui/error-state';
 import { useRunningOrders, useTables } from '@/data/queries';
 import { color } from '@/lib/theme';
 import { useNotifications } from '@/data/queries';
@@ -38,15 +39,29 @@ export default function Home() {
         <Text className="text-2xl font-extrabold text-fg">
           {t('appName')} <Text className="text-brand">POS</Text>
         </Text>
-        <Pressable
-          onPress={() => router.push('/(app)/notifications')}
-          className="h-11 w-11 items-center justify-center rounded-full bg-surface active:opacity-70"
-        >
-          <Bell size={20} color={color.text.primary} />
-          {unread > 0 && (
-            <View className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-brand" />
-          )}
-        </Pressable>
+        <View className="flex-row items-center gap-2">
+          <Pressable
+            onPress={() => router.push('/(app)/scan')}
+            className="h-11 w-11 items-center justify-center rounded-full bg-surface active:opacity-70"
+          >
+            <ScanLine size={20} color={color.brand.DEFAULT} />
+          </Pressable>
+          <Pressable
+            onPress={() => router.push('/(app)/notifications')}
+            className="h-11 w-11 items-center justify-center rounded-full bg-surface active:opacity-70"
+          >
+            <Bell size={20} color={color.text.primary} />
+            {unread > 0 && (
+              <View className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-brand" />
+            )}
+          </Pressable>
+          <Pressable
+            onPress={() => router.push('/(app)/settings')}
+            className="h-11 w-11 items-center justify-center rounded-full bg-surface active:opacity-70"
+          >
+            <SettingsIcon size={20} color={color.text.primary} />
+          </Pressable>
+        </View>
       </View>
 
       {/* Tabs */}
@@ -87,6 +102,8 @@ export default function Home() {
           />
           {tables.isLoading ? (
             <Loading />
+          ) : tables.isError ? (
+            <ErrorState onRetry={() => tables.refetch()} />
           ) : (
             <FlatList
               data={filteredTables}
@@ -106,6 +123,8 @@ export default function Home() {
         </>
       ) : orders.isLoading ? (
         <Loading />
+      ) : orders.isError ? (
+        <ErrorState onRetry={() => orders.refetch()} />
       ) : (
         <FlatList
           data={orders.data ?? []}

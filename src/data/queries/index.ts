@@ -1,5 +1,6 @@
 // src/data/queries — TanStack Query hooks trên PosApi. Query key convention Mục 4.
 import {
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
@@ -47,6 +48,16 @@ export function useBill(orderId: string) {
 
 export function useHistory(search?: string) {
   return useQuery({ queryKey: qk.history(search), queryFn: () => api.listBills({ search }) });
+}
+
+const PAGE_SIZE = 8;
+export function useHistoryInfinite(search?: string) {
+  return useInfiniteQuery({
+    queryKey: ['history', 'inf', search ?? ''],
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) => api.listBills({ search, page: pageParam, pageSize: PAGE_SIZE }),
+    getNextPageParam: (last) => (last.page * last.pageSize < last.total ? last.page + 1 : undefined),
+  });
 }
 
 export function useNotifications() {

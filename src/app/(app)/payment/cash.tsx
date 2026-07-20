@@ -2,7 +2,7 @@
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft } from 'lucide-react-native';
+import { Check, ChevronLeft } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
 import { NumericKeypad } from '@/components/ui/numeric-keypad';
@@ -10,6 +10,7 @@ import { usePay } from '@/data/queries';
 import { calcTotal } from '@/domain/pricing';
 import { cashSuggestions } from '@/lib/billing';
 import { formatMoney } from '@/lib/format';
+import { haptics } from '@/lib/haptics';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useBillStore } from '@/store/bill-store';
@@ -74,10 +75,17 @@ export default function PaymentCash() {
           </View>
         </View>
 
-        {/* Gợi ý mệnh giá */}
+        {/* Đúng tiền + gợi ý mệnh giá */}
         <View className="mt-3 flex-row flex-wrap gap-2">
+          <Pressable
+            onPress={() => { haptics.light(); setRaw(String(total)); }}
+            className="flex-row items-center rounded-full border border-brand bg-brand px-4 py-2 active:opacity-80"
+          >
+            <Check size={16} color="#fff" />
+            <Text className="ml-1.5 font-bold text-white">Đúng tiền</Text>
+          </Pressable>
           {cashSuggestions(total).map((s) => (
-            <Pressable key={s} onPress={() => setRaw(String(s))} className="rounded-full border border-line bg-surface px-4 py-2 active:opacity-70">
+            <Pressable key={s} onPress={() => { haptics.light(); setRaw(String(s)); }} className="rounded-full border border-line bg-surface px-4 py-2 active:opacity-70">
               <Text className="font-semibold text-fg">{formatMoney(s)}</Text>
             </Pressable>
           ))}
