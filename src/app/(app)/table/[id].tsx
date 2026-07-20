@@ -2,11 +2,12 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft, Minus, Plus } from 'lucide-react-native';
-import { Pressable, Text, TextInput, View } from '@/tw';
+import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
+import { TextField } from '@/components/ui/text-field';
 import { useCreateOrder, useRunningOrder, useTables } from '@/data/queries';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
@@ -90,7 +91,7 @@ export default function TableDetail() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0B0C' }}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         {/* Header */}
         <View className="flex-row items-center px-4 py-3">
           <Pressable onPress={() => router.back()} className="mr-2 h-10 w-10 items-center justify-center rounded-full bg-surface active:opacity-70">
@@ -99,16 +100,20 @@ export default function TableDetail() {
           <Text className="text-xl font-extrabold text-fg">Mở đơn · {table?.name ?? id}</Text>
         </View>
 
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 20, paddingBottom: 24 }}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 16, gap: 20, paddingBottom: 24 }}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+        >
           {/* Tên khách */}
           <View>
             <Text className="mb-2 font-semibold text-muted">Tên khách</Text>
-            <TextInput
+            <TextField
               value={customerName}
               onChangeText={setCustomerName}
               placeholder={`Khách ${table?.name ?? ''}`.trim()}
-              placeholderTextColor={color.text.muted}
-              className="rounded-2xl border border-line bg-surface px-4 py-4 text-base text-fg"
+              returnKeyType="next"
             />
           </View>
 
@@ -143,13 +148,11 @@ export default function TableDetail() {
           {/* Note */}
           <View>
             <Text className="mb-2 font-semibold text-muted">Ghi chú</Text>
-            <TextInput
+            <TextField
               value={note}
               onChangeText={setNote}
               placeholder="VD: khách quen, bàn gần cửa sổ…"
-              placeholderTextColor={color.text.muted}
               multiline
-              className="min-h-20 rounded-2xl border border-line bg-surface px-4 py-4 text-base text-fg"
             />
           </View>
         </ScrollView>

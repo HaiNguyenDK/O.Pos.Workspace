@@ -52,6 +52,9 @@ export const ModifierSheet = forwardRef<
     <BottomSheetModal
       ref={sheet}
       enableDynamicSizing
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
       backdropComponent={renderBackdrop}
       handleIndicatorStyle={{ backgroundColor: color.text.muted }}
       backgroundStyle={{ backgroundColor: color.bg.surface }}
@@ -107,7 +110,7 @@ export const ModifierSheet = forwardRef<
                 borderColor: color.line,
                 backgroundColor: color.bg.elevated,
                 color: color.text.primary,
-                paddingHorizontal: 16,
+                paddingHorizontal: 18,
                 paddingVertical: 14,
                 fontSize: 16,
               }}
