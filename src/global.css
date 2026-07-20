@@ -1,9 +1,56 @@
-:root {
-  --font-display:
-    Spline Sans, Inter, ui-sans-serif, system-ui, sans-serif, Apple Color Emoji, Segoe UI Emoji,
-    Segoe UI Symbol, Noto Color Emoji;
-  --font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace;
-  --font-rounded: 'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif;
-  --font-serif: Georgia, 'Times New Roman', serif;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css";
+
+/* ── Waiter POS — Luxury Dark + Cam sang trọng ──
+   Nguồn chốt: docs/waiter-pos-mobile-sprint0.md Mục 3.
+   Utilities sinh ra: bg-*, text-*, border-* theo mỗi --color-*. */
+@theme {
+  /* Brand — CAM (thay mọi accent xanh lá) */
+  --color-brand: #f37021;
+  --color-brand-bright: #ff8c00;
+
+  /* Nền đen/xám nhám — giữ chiều sâu Dark Theme */
+  --color-app: #0b0b0c;
+  --color-surface: #1a1a1d;
+  --color-elevated: #242428;
+  --color-line: #2a2a2e;
+
+  /* Text */
+  --color-fg: #ffffff;
+  --color-muted: #a1a1aa;
+
+  /* CTA giỏ hàng — GIỮ đỏ */
+  --color-cart: #ef4444;
+
+  /* Status (đèn giao thông chức năng) — GIỮ semantic khớp KDS/dashboard */
+  --color-available: #22c55e;
+  --color-occupied: #f97316;
+  --color-reserved: #3b82f6;
+  --color-pending: #f59e0b;
+  --color-ready: #22c55e;
+  --color-paid: #71717a;
+  --color-cancelled: #ef4444;
+
+  /* Radius */
+  --radius-phone: 54px;
+}
+
+/* Platform-specific font families */
+@media android {
+  :root {
+    --font-mono: monospace;
+    --font-rounded: normal;
+    --font-serif: serif;
+    --font-sans: normal;
+  }
+}
+
+@media ios {
+  :root {
+    --font-mono: ui-monospace;
+    --font-serif: ui-serif;
+    --font-sans: system-ui;
+    --font-rounded: ui-rounded;
+  }
 }
