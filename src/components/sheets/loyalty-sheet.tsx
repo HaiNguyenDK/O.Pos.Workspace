@@ -1,6 +1,7 @@
 // src/components/sheets/loyalty-sheet.tsx — tra cứu khách hàng thân thiết theo SĐT (PosApi.lookupCustomer — P1).
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetTextInput, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Star } from 'lucide-react-native';
 import { Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
@@ -13,6 +14,7 @@ import type { Customer } from '@/data/types';
 export type LoyaltySheetHandle = { present: () => void };
 
 export const LoyaltySheet = forwardRef<LoyaltySheetHandle>(function LoyaltySheet(_props, ref) {
+  const { t } = useTranslation();
   const sheet = useRef<BottomSheetModal>(null);
   const [phone, setPhone] = useState('');
   const [found, setFound] = useState<Customer | null>(null);
@@ -28,20 +30,20 @@ export const LoyaltySheet = forwardRef<LoyaltySheetHandle>(function LoyaltySheet
   }));
 
   const search = (p: string) => {
-    if (p.replace(/\D/g, '').length < 9) return toast.error('SĐT chưa đúng', 'Cần ít nhất 9 số');
+    if (p.replace(/\D/g, '').length < 9) return toast.error(t('loyalty.invalidPhone'), t('loyalty.minDigits'));
     lookup.mutate(p, {
       onSuccess: (c) => {
         setFound(c);
-        if (!c) toast.error('Không tìm thấy', p);
+        if (!c) toast.error(t('loyalty.notFound'), p);
       },
-      onError: (e) => toast.error('Lỗi tra cứu', (e as Error).message),
+      onError: (e) => toast.error(t('loyalty.lookupError'), (e as Error).message),
     });
   };
 
   const apply = () => {
     if (!found) return;
     setCustomer(found);
-    toast.success('Đã gắn khách', `${found.name} · ${found.pointBalance} điểm`);
+    toast.success(t('loyalty.attached'), t('loyalty.attachedDetail', { name: found.name, count: found.pointBalance }));
     sheet.current?.dismiss();
   };
 
@@ -62,12 +64,12 @@ export const LoyaltySheet = forwardRef<LoyaltySheetHandle>(function LoyaltySheet
       backgroundStyle={{ backgroundColor: color.bg.surface }}
     >
       <BottomSheetView style={{ padding: 20, paddingBottom: 36 }}>
-        <Text className="text-xl font-extrabold text-fg">Khách thân thiết</Text>
+        <Text className="text-xl font-extrabold text-fg">{t('loyalty.title')}</Text>
         <BottomSheetTextInput
           value={phone}
           onChangeText={setPhone}
           keyboardType="phone-pad"
-          placeholder="Số điện thoại…"
+          placeholder={t('loyalty.phonePlaceholder')}
           placeholderTextColor={color.text.muted}
           onSubmitEditing={() => search(phone)}
           style={{
@@ -88,14 +90,14 @@ export const LoyaltySheet = forwardRef<LoyaltySheetHandle>(function LoyaltySheet
             <View className="ml-3 flex-1">
               <Text className="font-bold text-fg">{found.name}</Text>
               <Text className="text-xs text-muted">
-                {found.phone} · {found.pointBalance} điểm{found.tier ? ` · ${found.tier}` : ''}
+                {found.phone} · {t('loyalty.points', { count: found.pointBalance })}{found.tier ? ` · ${found.tier}` : ''}
               </Text>
             </View>
           </View>
         )}
         <View className="mt-6 flex-row gap-3">
-          <Button className="flex-1" variant="ghost" label="Tra cứu" loading={lookup.isPending} onPress={() => search(phone)} />
-          <Button className="flex-1" label="Gắn khách" onPress={apply} disabled={!found} />
+          <Button className="flex-1" variant="ghost" label={t('loyalty.lookup')} loading={lookup.isPending} onPress={() => search(phone)} />
+          <Button className="flex-1" label={t('loyalty.attach')} onPress={apply} disabled={!found} />
         </View>
       </BottomSheetView>
     </BottomSheetModal>

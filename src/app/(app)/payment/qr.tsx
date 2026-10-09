@@ -3,6 +3,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
@@ -26,6 +27,7 @@ import { toast } from '@/lib/toast';
 import { useBillStore } from '@/store/bill-store';
 
 export default function PaymentQr() {
+  const { t } = useTranslation();
   const router = useRouter();
   const approvalSheet = useRef<ApprovalSheetHandle>(null);
   const qc = useQueryClient();
@@ -55,7 +57,7 @@ export default function PaymentQr() {
           // Đã có giao dịch chờ (vd quay lại màn) → dùng tiếp giao dịch đó.
           const pending = bill.data?.payments.find((x) => x.status === 'PENDING' && x.method === 'VIETQR');
           if (isPosApiError(e) && e.code === 'PAYMENT_PENDING' && pending) return setPaymentId(pending.id);
-          toast.error('Không tạo được mã', (e as Error).message);
+          toast.error(t('payment.qrCreateFailed'), (e as Error).message);
         },
       }
     );
@@ -114,10 +116,10 @@ export default function PaymentQr() {
 
   const manualConfirm = () =>
     p &&
-    approvalSheet.current?.request('CONFIRM_PAYMENT', `Xác nhận đã nhận ${formatMoney(p.amount)} — cần quản lý duyệt`, (a) =>
+    approvalSheet.current?.request('CONFIRM_PAYMENT', t('payment.manualApproval', { amount: formatMoney(p.amount) }), (a) =>
       confirmManual.mutate(
         { idempotencyKey: newId(), paymentId: p.id, approvalToken: a.approvalToken, reason: 'Khách đã chuyển, cổng chưa báo về' },
-        { onError: (e) => toast.error('Không xác nhận được', (e as Error).message) }
+        { onError: (e) => toast.error(t('payment.manualFailed'), (e as Error).message) }
       )
     );
 
@@ -127,11 +129,11 @@ export default function PaymentQr() {
         <Pressable onPress={() => router.back()} className="mr-2 h-10 w-10 items-center justify-center rounded-full bg-surface active:opacity-70">
           <ChevronLeft size={22} color={color.text.primary} />
         </Pressable>
-        <Text className="text-xl font-extrabold text-fg">VietQR</Text>
+        <Text className="text-xl font-extrabold text-fg">{t('payment.qr')}</Text>
       </View>
 
       <View className="flex-1 items-center justify-center px-6">
-        <Text className="mb-1 text-muted">Quét mã để thanh toán</Text>
+        <Text className="mb-1 text-muted">{t('payment.scanToPay')}</Text>
         <Text className="mb-6 text-3xl font-extrabold text-brand">{formatMoney(p?.amount ?? due)}</Text>
 
         <View className="rounded-3xl bg-white p-5" style={{ opacity: expired || ended ? 0.3 : 1 }}>
@@ -139,18 +141,24 @@ export default function PaymentQr() {
         </View>
 
         <Text className={`mt-6 text-lg font-bold ${expired || ended ? 'text-cancelled' : 'text-fg'}`}>
-          {!p ? 'Đang tạo mã…' : expired ? 'Mã đã hết hạn' : ended ? 'Giao dịch đã huỷ' : `Còn hiệu lực ${mm}:${ss}`}
+          {!p
+            ? t('payment.qrCreating')
+            : expired
+              ? t('payment.qrExpired')
+              : ended
+                ? t('payment.qrCancelled')
+                : t('payment.qrValidFor', { time: `${mm}:${ss}` })}
         </Text>
-        {p?.status === 'PENDING' && !expired && <Text className="mt-2 text-muted">Đang chờ ngân hàng xác nhận…</Text>}
+        {p?.status === 'PENDING' && !expired && <Text className="mt-2 text-muted">{t('payment.waitingBank')}</Text>}
       </View>
 
       <View className="gap-3 px-4 pb-4">
         {expired || ended ? (
-          <Button label="Tạo mã mới" loading={start.isPending || cancel.isPending} onPress={regenerate} />
+          <Button label={t('payment.qrRegenerate')} loading={start.isPending || cancel.isPending} onPress={regenerate} />
         ) : (
           <Button
             variant="ghost"
-            label="Khách đã chuyển nhưng chưa báo về (quản lý duyệt)"
+            label={t('payment.manualConfirm')}
             disabled={p?.status !== 'PENDING'}
             loading={confirmManual.isPending}
             onPress={manualConfirm}

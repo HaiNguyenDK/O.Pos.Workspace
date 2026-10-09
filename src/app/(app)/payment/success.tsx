@@ -2,6 +2,7 @@
 // Đã chia bill và còn phần chưa thu → "Thu phần tiếp"; thu đủ → "Hoàn tất".
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ActivityIndicator } from 'react-native';
 import { CheckCircle2, Mail, MessageSquare, Printer, ReceiptText } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,7 +12,7 @@ import { useBill, useBills, useMe, usePayment } from '@/data/queries';
 import { printReceipt } from '@/native/printer';
 import { formatMoney } from '@/lib/format';
 import { haptics } from '@/lib/haptics';
-import { methodLabel } from '@/lib/status';
+import { methodLabelKey } from '@/lib/status';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useBillStore } from '@/store/bill-store';
@@ -19,6 +20,7 @@ import { useCartStore } from '@/store/cart-store';
 import { useOrderStore } from '@/store/order-store';
 
 export default function PaymentSuccess() {
+  const { t } = useTranslation();
   const router = useRouter();
   const clearOrder = useOrderStore((s) => s.clear);
   const clearCart = useCartStore((s) => s.clear);
@@ -58,10 +60,10 @@ export default function PaymentSuccess() {
     if (!b) return;
     const br = me.data?.branch;
     const res = await printReceipt(b, br ? { name: br.name, address: br.address, phone: br.phone } : undefined);
-    if (res.printed) toast.success('Đã in hoá đơn', b.code);
-    else if (res.reason === 'unsupported') toast.info('Không có máy in Sunmi', 'Chạy trên Sunmi V2s để in giấy');
-    else if (res.reason === 'not_connected') toast.error('Máy in chưa kết nối', 'Kiểm tra dịch vụ in của Sunmi');
-    else toast.error('In lỗi', 'Vui lòng thử lại');
+    if (res.printed) toast.success(t('printer.printed'), b.code);
+    else if (res.reason === 'unsupported') toast.info(t('printer.noSunmi'), t('printer.runOnSunmiToPrint'));
+    else if (res.reason === 'not_connected') toast.error(t('printer.notConnected'), t('printer.checkService'));
+    else toast.error(t('printer.error'), t('printer.tryAgain'));
   };
 
   return (
@@ -71,21 +73,21 @@ export default function PaymentSuccess() {
           <View className="h-20 w-20 items-center justify-center rounded-full" style={{ backgroundColor: 'rgba(34,197,94,0.15)' }}>
             <CheckCircle2 size={48} color={color.status.available} />
           </View>
-          <Text className="mt-4 text-2xl font-extrabold text-fg">Thanh toán thành công</Text>
+          <Text className="mt-4 text-2xl font-extrabold text-fg">{t('payment.success')}</Text>
           {!p || !b ? (
             <ActivityIndicator className="mt-3" color={color.brand.DEFAULT} />
           ) : (
             <>
               <Text className="mt-1 text-3xl font-extrabold text-brand">{formatMoney(p.amount)}</Text>
               <Text className="mt-1 text-muted">
-                {methodLabel[p.method]} · {b.code}
-                {b.part ? ` · phần ${b.part.index + 1}/${b.part.of}` : ''}
+                {t(methodLabelKey[p.method])} · {b.code}
+                {b.part ? ` · ${t('common.partOf', { n: b.part.index + 1, of: b.part.of })}` : ''}
               </Text>
               {p.method === 'CASH' && (p.change ?? 0) > 0 && (
-                <Text className="mt-1 text-muted">Tiền thối: {formatMoney(p.change ?? 0)}</Text>
+                <Text className="mt-1 text-muted">{t('payment.changeAmount', { amount: formatMoney(p.change ?? 0) })}</Text>
               )}
               {p.confirmedBy === 'STAFF' && p.method !== 'CASH' && (
-                <Text className="mt-1 text-xs text-muted">Xác nhận thủ công (quản lý duyệt)</Text>
+                <Text className="mt-1 text-xs text-muted">{t('payment.manualConfirmed')}</Text>
               )}
             </>
           )}
@@ -93,18 +95,18 @@ export default function PaymentSuccess() {
 
         {/* Actions */}
         <View className="mt-8 flex-row flex-wrap gap-3">
-          <ActionBtn icon={<Printer size={22} color={color.text.primary} />} label="In bill" onPress={doPrint} />
-          <ActionBtn icon={<Mail size={22} color={color.text.primary} />} label="Email" onPress={() => toast.info('Gửi email', 'Tính năng ở giai đoạn sau')} />
-          <ActionBtn icon={<MessageSquare size={22} color={color.text.primary} />} label="SMS" onPress={() => toast.info('Gửi SMS', 'Tính năng ở giai đoạn sau')} />
-          <ActionBtn icon={<ReceiptText size={22} color={color.text.primary} />} label="HĐ điện tử" onPress={() => toast.info('Hoá đơn điện tử', 'Chờ chốt pháp lý — pos-plan Mục 8 #3')} />
+          <ActionBtn icon={<Printer size={22} color={color.text.primary} />} label={t('payment.printBill')} onPress={doPrint} />
+          <ActionBtn icon={<Mail size={22} color={color.text.primary} />} label={t('payment.email')} onPress={() => toast.info(t('payment.sendEmail'), t('payment.laterPhase'))} />
+          <ActionBtn icon={<MessageSquare size={22} color={color.text.primary} />} label={t('payment.sms')} onPress={() => toast.info(t('payment.sendSms'), t('payment.laterPhase'))} />
+          <ActionBtn icon={<ReceiptText size={22} color={color.text.primary} />} label={t('payment.eInvoice')} onPress={() => toast.info(t('payment.eInvoiceTitle'), t('payment.eInvoicePending'))} />
         </View>
       </View>
 
       <View className="px-4 pb-4">
         {remaining.length > 0 ? (
-          <Button label="Thu phần tiếp theo" onPress={nextPart} />
+          <Button label={t('payment.nextPart')} onPress={nextPart} />
         ) : (
-          <Button label="Hoàn tất" onPress={finish} />
+          <Button label={t('payment.done')} onPress={finish} />
         )}
       </View>
     </SafeAreaView>

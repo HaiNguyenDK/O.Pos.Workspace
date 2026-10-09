@@ -1,6 +1,7 @@
 // src/components/sheets/voucher-sheet.tsx — nhập mã giảm giá. Server kiểm tra khi tính bill (requestBill).
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetTextInput, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
 import { color } from '@/lib/theme';
@@ -11,6 +12,7 @@ export type VoucherSheetHandle = { present: () => void };
 const SUGGESTED = ['GIAM10', 'GIAM20', 'GIAM50K'];
 
 export const VoucherSheet = forwardRef<VoucherSheetHandle>(function VoucherSheet(_props, ref) {
+  const { t } = useTranslation();
   const sheet = useRef<BottomSheetModal>(null);
   const [code, setCode] = useState('');
   const setVoucherCode = useBillStore((s) => s.setVoucherCode);
@@ -45,12 +47,12 @@ export const VoucherSheet = forwardRef<VoucherSheetHandle>(function VoucherSheet
       backgroundStyle={{ backgroundColor: color.bg.surface }}
     >
       <BottomSheetView style={{ padding: 20, paddingBottom: 36 }}>
-        <Text className="text-xl font-extrabold text-fg">Voucher</Text>
+        <Text className="text-xl font-extrabold text-fg">{t('voucher.title')}</Text>
         <BottomSheetTextInput
           value={code}
           onChangeText={setCode}
           autoCapitalize="characters"
-          placeholder="Nhập mã…"
+          placeholder={t('voucher.placeholder')}
           placeholderTextColor={color.text.muted}
           style={{
             marginTop: 14,
@@ -71,7 +73,7 @@ export const VoucherSheet = forwardRef<VoucherSheetHandle>(function VoucherSheet
             </Pressable>
           ))}
         </View>
-        <Button className="mt-6" label="Áp dụng" onPress={() => apply(code)} disabled={!code.trim()} />
+        <Button className="mt-6" label={t('voucher.apply')} onPress={() => apply(code)} disabled={!code.trim()} />
       </BottomSheetView>
     </BottomSheetModal>
   );

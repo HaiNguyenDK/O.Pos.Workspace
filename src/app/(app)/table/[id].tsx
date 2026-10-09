@@ -57,7 +57,7 @@ export default function TableDetail() {
       {
         idempotencyKey: action.key(),
         tableId: id,
-        customerName: customerName.trim() || `Khách ${table?.name ?? ''}`.trim(),
+        customerName: customerName.trim() || t('table.defaultCustomer', { name: table?.name ?? '' }).trim(),
         guests,
         mode,
         note: note.trim() || undefined,
@@ -71,7 +71,7 @@ export default function TableDetail() {
           action.settle(e);
           // Máy khác vừa mở đơn cho bàn này → vào luôn đơn đó.
           if (isPosApiError(e) && e.code === 'TABLE_OCCUPIED') {
-            toast.info('Bàn đã có đơn', 'Mở đơn đang chạy của bàn');
+            toast.info(t('table.alreadyOpen'), t('table.alreadyOpenHint'));
             running.refetch();
             return;
           }
@@ -97,7 +97,7 @@ export default function TableDetail() {
           <Pressable onPress={() => router.back()} className="mr-2 h-10 w-10 items-center justify-center rounded-full bg-surface active:opacity-70">
             <ChevronLeft size={22} color={color.text.primary} />
           </Pressable>
-          <Text className="text-xl font-extrabold text-fg">Mở đơn · {table?.name ?? id}</Text>
+          <Text className="text-xl font-extrabold text-fg">{t('table.openTitle', { name: table?.name ?? id })}</Text>
         </View>
 
         <ScrollView
@@ -108,18 +108,18 @@ export default function TableDetail() {
         >
           {/* Tên khách */}
           <View>
-            <Text className="mb-2 font-semibold text-muted">Tên khách</Text>
+            <Text className="mb-2 font-semibold text-muted">{t('table.customerName')}</Text>
             <TextField
               value={customerName}
               onChangeText={setCustomerName}
-              placeholder={`Khách ${table?.name ?? ''}`.trim()}
+              placeholder={t('table.defaultCustomer', { name: table?.name ?? '' }).trim()}
               returnKeyType="next"
             />
           </View>
 
           {/* Số người */}
           <View>
-            <Text className="mb-2 font-semibold text-muted">Số người</Text>
+            <Text className="mb-2 font-semibold text-muted">{t('table.guests')}</Text>
             <View className="flex-row items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3">
               <Stepper onPress={() => setGuests((g) => Math.max(1, g - 1))} icon={<Minus size={20} color={color.text.primary} />} />
               <Text className="text-2xl font-extrabold text-fg">{guests}</Text>
@@ -129,7 +129,7 @@ export default function TableDetail() {
 
           {/* Mode */}
           <View>
-            <Text className="mb-2 font-semibold text-muted">Hình thức</Text>
+            <Text className="mb-2 font-semibold text-muted">{t('table.mode')}</Text>
             <View className="flex-row rounded-2xl bg-surface p-1">
               {(['DINE_IN', 'TAKE_AWAY'] as ServiceMode[]).map((m) => (
                 <Pressable
@@ -138,7 +138,7 @@ export default function TableDetail() {
                   className={`flex-1 items-center rounded-xl py-3 ${mode === m ? 'bg-brand' : ''}`}
                 >
                   <Text className={`font-bold ${mode === m ? 'text-white' : 'text-muted'}`}>
-                    {m === 'DINE_IN' ? 'Tại bàn' : 'Mang về'}
+                    {m === 'DINE_IN' ? t('common.dineIn') : t('common.takeaway')}
                   </Text>
                 </Pressable>
               ))}
@@ -147,18 +147,18 @@ export default function TableDetail() {
 
           {/* Note */}
           <View>
-            <Text className="mb-2 font-semibold text-muted">Ghi chú</Text>
+            <Text className="mb-2 font-semibold text-muted">{t('common.note')}</Text>
             <TextField
               value={note}
               onChangeText={setNote}
-              placeholder="VD: khách quen, bàn gần cửa sổ…"
+              placeholder={t('table.notePlaceholder')}
               multiline
             />
           </View>
         </ScrollView>
 
         <View className="border-t border-line px-4 py-4">
-          <Button label="Mở đơn & chọn món" onPress={submit} loading={openOrder.isPending} />
+          <Button label={t('table.submit')} onPress={submit} loading={openOrder.isPending} />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

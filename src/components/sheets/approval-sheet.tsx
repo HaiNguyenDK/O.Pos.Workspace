@@ -2,6 +2,7 @@
 // Trả về approvalToken dùng 1 lần cho đúng thao tác (huỷ món đã làm, giảm giá tay, xác nhận VietQR thủ công).
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ShieldCheck } from 'lucide-react-native';
 import { Text, View } from '@/tw';
 import { PinKeypad } from '@/components/ui/pin-keypad';
@@ -15,6 +16,7 @@ export type ApprovalSheetHandle = {
 };
 
 export const ApprovalSheet = forwardRef<ApprovalSheetHandle>(function ApprovalSheet(_props, ref) {
+  const { t: tr } = useTranslation();
   const sheet = useRef<BottomSheetModal>(null);
   const approve = useRequestApproval();
   const [pin, setPin] = useState('');
@@ -66,7 +68,7 @@ export const ApprovalSheet = forwardRef<ApprovalSheetHandle>(function ApprovalSh
       <BottomSheetView style={{ padding: 20, paddingBottom: 36, alignItems: 'center' }}>
         <View className="mb-2 flex-row items-center">
           <ShieldCheck size={20} color={color.brand.DEFAULT} />
-          <Text className="ml-2 text-xl font-extrabold text-fg">Quản lý duyệt</Text>
+          <Text className="ml-2 text-xl font-extrabold text-fg">{tr('approval.title')}</Text>
         </View>
         <Text className="mb-6 text-center text-muted">{error ?? title}</Text>
         <PinKeypad value={pin} onChange={setPin} error={!!error} />

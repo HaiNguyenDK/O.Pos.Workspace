@@ -14,6 +14,7 @@ import { color } from '@/lib/theme';
 import { useNotifications } from '@/data/queries';
 
 type Tab = 'tables' | 'orders';
+const ALL_ZONES = '__all__';
 
 export default function Home() {
   const { t } = useTranslation();
@@ -27,10 +28,10 @@ export default function Home() {
 
   const zones = useMemo(() => {
     const z = new Set((tables.data ?? []).map((t) => t.zone));
-    return ['Tất cả', ...z];
+    return [ALL_ZONES, ...z];
   }, [tables.data]);
-  const [zone, setZone] = useState('Tất cả');
-  const filteredTables = (tables.data ?? []).filter((tb) => zone === 'Tất cả' || tb.zone === zone);
+  const [zone, setZone] = useState(ALL_ZONES);
+  const filteredTables = (tables.data ?? []).filter((tb) => zone === ALL_ZONES || tb.zone === zone);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0B0C' }} edges={['top']}>
@@ -95,7 +96,7 @@ export default function Home() {
                 className={`h-9 justify-center rounded-full px-4 ${zone === item ? 'bg-elevated border border-brand' : 'bg-surface'}`}
               >
                 <Text className={zone === item ? 'font-semibold text-brand' : 'text-muted'}>
-                  {item}
+                  {item === ALL_ZONES ? t('common.all') : item}
                 </Text>
               </Pressable>
             )}

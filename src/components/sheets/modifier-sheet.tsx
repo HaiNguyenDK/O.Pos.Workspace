@@ -2,6 +2,7 @@
 // Nhóm chọn 1 → radio; nhóm chọn nhiều → checkbox giới hạn max. Kiểm tra bằng domain/modifiers (server kiểm lại).
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView, BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, Minus, Plus } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
@@ -11,7 +12,7 @@ import { formatMoney } from '@/lib/format';
 import { color } from '@/lib/theme';
 import type { LineModifier, MenuItem, ModifierGroup } from '@/data/types';
 
-const QUICK_NOTES = ['Ít cay', 'Không hành', 'Mang về', 'Làm nhanh'];
+const QUICK_NOTE_KEYS = ['modifier.notes.lessSpicy', 'modifier.notes.noOnion', 'modifier.notes.takeaway', 'modifier.notes.rush'];
 
 export type ModifierSheetHandle = { present: (item: MenuItem) => void };
 
@@ -19,6 +20,7 @@ export const ModifierSheet = forwardRef<
   ModifierSheetHandle,
   { onAdd: (item: MenuItem, qty: number, note: string | undefined, modifiers: LineModifier[]) => void }
 >(function ModifierSheet({ onAdd }, ref) {
+  const { t } = useTranslation();
   const sheet = useRef<BottomSheetModal>(null);
   const [item, setItem] = useState<MenuItem | null>(null);
   const [qty, setQty] = useState(1);
@@ -89,8 +91,8 @@ export const ModifierSheet = forwardRef<
                   <View className="mb-2 flex-row items-center justify-between">
                     <Text className="font-semibold text-fg">{g.name}</Text>
                     <Text className="text-xs text-muted">
-                      {g.min > 0 ? 'Bắt buộc' : 'Tuỳ chọn'}
-                      {g.max > 1 ? ` · tối đa ${g.max} (${count})` : ''}
+                      {g.min > 0 ? t('modifier.required') : t('modifier.optional')}
+                      {g.max > 1 ? ` · ${t('modifier.max', { max: g.max, count })}` : ''}
                     </Text>
                   </View>
                   <View className="gap-2">
@@ -120,7 +122,7 @@ export const ModifierSheet = forwardRef<
 
             {/* Qty */}
             <View className="mt-5 flex-row items-center justify-between rounded-2xl border border-line bg-elevated px-4 py-3">
-              <Text className="font-semibold text-muted">Số lượng</Text>
+              <Text className="font-semibold text-muted">{t('common.quantity')}</Text>
               <View className="flex-row items-center gap-5">
                 <Pressable onPress={() => setQty((q) => Math.max(1, q - 1))} className="h-10 w-10 items-center justify-center rounded-full bg-surface active:opacity-70">
                   <Minus size={18} color={color.text.primary} />
@@ -133,9 +135,9 @@ export const ModifierSheet = forwardRef<
             </View>
 
             {/* Quick notes */}
-            <Text className="mb-2 mt-5 font-semibold text-muted">Ghi chú nhanh</Text>
+            <Text className="mb-2 mt-5 font-semibold text-muted">{t('modifier.quickNotes')}</Text>
             <View className="flex-row flex-wrap gap-2">
-              {QUICK_NOTES.map((n) => {
+              {QUICK_NOTE_KEYS.map((k) => t(k)).map((n) => {
                 const on = notes.includes(n);
                 return (
                   <Pressable
@@ -154,7 +156,7 @@ export const ModifierSheet = forwardRef<
             <BottomSheetTextInput
               value={freeNote}
               onChangeText={setFreeNote}
-              placeholder="Ghi chú khác…"
+              placeholder={t('modifier.otherNote')}
               placeholderTextColor={color.text.muted}
               style={{
                 marginTop: 16,
@@ -171,7 +173,7 @@ export const ModifierSheet = forwardRef<
 
             <Button
               className="mt-6"
-              label={check.error ?? `Thêm ${qty} món · ${formatMoney(price)}`}
+              label={check.error ?? t('modifier.add', { count: qty, amount: formatMoney(price) })}
               disabled={!!check.error}
               onPress={confirm}
             />

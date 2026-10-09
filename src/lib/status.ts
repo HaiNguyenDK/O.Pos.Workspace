@@ -18,12 +18,13 @@ export const orderTone: Record<OrderStatus, Tone> = {
   MERGED: 'paid',
 };
 
-export const orderLabel: Record<OrderStatus, string> = {
-  OPEN: 'Đang phục vụ',
-  BILLING: 'Chờ thanh toán',
-  PAID: 'Đã thu',
-  VOIDED: 'Đã huỷ',
-  MERGED: 'Đã gộp',
+// Nhãn hiển thị = i18n key; dịch tại call site bằng t(...).
+export const orderLabelKey: Record<OrderStatus, string> = {
+  OPEN: 'orderStatus.OPEN',
+  BILLING: 'orderStatus.BILLING',
+  PAID: 'orderStatus.PAID',
+  VOIDED: 'orderStatus.VOIDED',
+  MERGED: 'orderStatus.MERGED',
 };
 
 export const lineTone: Record<LineStatus, Tone> = {
@@ -34,17 +35,17 @@ export const lineTone: Record<LineStatus, Tone> = {
   VOIDED: 'cancelled',
 };
 
-export const lineLabel: Record<LineStatus, string> = {
-  FIRED: 'Đã gửi',
-  PREPARING: 'Đang làm',
-  READY: 'Sẵn sàng',
-  SERVED: 'Đã ra món',
-  VOIDED: 'Đã huỷ',
+export const lineLabelKey: Record<LineStatus, string> = {
+  FIRED: 'lineStatus.FIRED',
+  PREPARING: 'lineStatus.PREPARING',
+  READY: 'lineStatus.READY',
+  SERVED: 'lineStatus.SERVED',
+  VOIDED: 'lineStatus.VOIDED',
 };
 
-export const methodLabel: Record<PaymentMethod, string> = {
-  CASH: 'Tiền mặt',
-  VIETQR: 'VietQR',
-  CARD: 'Thẻ',
-  EWALLET: 'Ví điện tử',
+export const methodLabelKey: Record<PaymentMethod, string> = {
+  CASH: 'paymentMethod.CASH',
+  VIETQR: 'paymentMethod.VIETQR',
+  CARD: 'paymentMethod.CARD',
+  EWALLET: 'paymentMethod.EWALLET',
 };

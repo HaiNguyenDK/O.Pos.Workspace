@@ -2,6 +2,7 @@
 // Mỗi lần đổi điều chỉnh → requestBill; số tiền hiển thị LUÔN là Bill server trả (D7).
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, ScrollView, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft, Split, Ticket, X } from 'lucide-react-native';
@@ -22,6 +23,7 @@ import { useBillStore } from '@/store/bill-store';
 import { useOrderStore } from '@/store/order-store';
 
 export default function BillScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
   const voucherSheet = useRef<VoucherSheetHandle>(null);
   const loyaltySheet = useRef<LoyaltySheetHandle>(null);
@@ -54,21 +56,21 @@ export default function BillScreen() {
       {
         onSuccess: (b) => adj.setBillId(b.id),
         onError: (e) => {
-          if (!isPosApiError(e)) return toast.error('Mất kết nối', 'Không tính được hoá đơn');
+          if (!isPosApiError(e)) return toast.error(t('bill.networkLost'), t('bill.calcFailed'));
           if (e.code === 'VERSION_CONFLICT') return void order.refetch();
           if (e.code === 'APPROVAL_REQUIRED' && adj.manualDiscount) {
             const d = adj.manualDiscount;
             return approvalSheet.current?.request(
               'MANUAL_DISCOUNT',
-              `Giảm ${formatMoney(d.value)} — cần quản lý duyệt`,
+              t('bill.discountApproval', { amount: formatMoney(d.value) }),
               (a) => adj.setManualDiscount({ ...d, approvalToken: a.approvalToken })
             );
           }
           if (e.code === 'VALIDATION' && adj.voucherCode) {
             adj.setVoucherCode(null);
-            return toast.error('Voucher không áp dụng được', e.message);
+            return toast.error(t('bill.voucherInvalid'), e.message);
           }
-          toast.error('Không tính được hoá đơn', e.message);
+          toast.error(t('bill.calcFailed'), e.message);
         },
       }
     );
@@ -87,8 +89,8 @@ export default function BillScreen() {
           <ChevronLeft size={22} color={color.text.primary} />
         </Pressable>
         <View className="flex-1">
-          <Text className="text-xl font-extrabold text-fg">Hoá đơn{b ? ` · ${b.code}` : ''}</Text>
-          <Text className="text-xs text-muted">{active.tableName ?? 'Mang về'} · {active.customerName}</Text>
+          <Text className="text-xl font-extrabold text-fg">{t('bill.title')}{b ? ` · ${b.code}` : ''}</Text>
+          <Text className="text-xs text-muted">{active.tableName ?? t('common.takeaway')} · {active.customerName}</Text>
         </View>
       </View>
 
@@ -114,14 +116,14 @@ export default function BillScreen() {
         <View className="flex-row gap-3">
           <ActionTile
             icon={<Ticket size={18} color={color.brand.DEFAULT} />}
-            label={adj.voucherCode ?? 'Voucher'}
+            label={adj.voucherCode ?? t('bill.voucher')}
             active={!!adj.voucherCode}
             onPress={() => voucherSheet.current?.present()}
             onClear={adj.voucherCode ? () => adj.setVoucherCode(null) : undefined}
           />
           <ActionTile
             icon={<Text className="text-base">⭐</Text>}
-            label={adj.customer ? adj.customer.name : 'Tích điểm'}
+            label={adj.customer ? adj.customer.name : t('bill.loyalty')}
             active={!!adj.customer}
             onPress={() => loyaltySheet.current?.present()}
             onClear={adj.customer ? () => adj.setCustomer(null) : undefined}
@@ -129,10 +131,10 @@ export default function BillScreen() {
         </View>
 
         {/* Tip */}
-        <Presets label="Tip" values={TIP_PRESETS} selected={adj.tip} onSelect={adj.setTip} />
+        <Presets label={t('bill.tip')} values={TIP_PRESETS} selected={adj.tip} onSelect={adj.setTip} />
         {/* Giảm giá tay — waiter/thu ngân cần quản lý duyệt (pos-plan Mục 6) */}
         <Presets
-          label="Giảm giá"
+          label={t('common.discount')}
           values={DISCOUNT_PRESETS}
           selected={discountValue}
           onSelect={(v) =>
@@ -144,8 +146,8 @@ export default function BillScreen() {
         {!!settings?.serviceChargeRate && (
           <View className="flex-row items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3">
             <View>
-              <Text className="font-semibold text-fg">Phí phục vụ {Math.round(settings.serviceChargeRate * 100)}%</Text>
-              <Text className="text-xs text-muted">Tính sau giảm giá, trước VAT</Text>
+              <Text className="font-semibold text-fg">{t('bill.serviceChargeRate', { rate: Math.round(settings.serviceChargeRate * 100) })}</Text>
+              <Text className="text-xs text-muted">{t('bill.serviceChargeHint')}</Text>
             </View>
             <Switch
               value={adj.serviceCharge}
@@ -162,13 +164,13 @@ export default function BillScreen() {
             <ActivityIndicator color={color.brand.DEFAULT} />
           ) : (
             <>
-              <Row label="Tạm tính" value={formatMoney(b.subtotal)} />
-              {b.discountTotal > 0 && <Row label="Giảm giá" value={`- ${formatMoney(b.discountTotal)}`} accent />}
-              {b.serviceCharge > 0 && <Row label="Phí phục vụ" value={formatMoney(b.serviceCharge)} />}
-              <Row label={`Thuế (${taxLabel(b.taxRate)})`} value={formatMoney(b.tax)} />
-              {b.tip > 0 && <Row label="Tip" value={formatMoney(b.tip)} />}
+              <Row label={t('common.subtotal')} value={formatMoney(b.subtotal)} />
+              {b.discountTotal > 0 && <Row label={t('common.discount')} value={`- ${formatMoney(b.discountTotal)}`} accent />}
+              {b.serviceCharge > 0 && <Row label={t('common.serviceCharge')} value={formatMoney(b.serviceCharge)} />}
+              <Row label={t('common.tax', { rate: taxLabel(b.taxRate) })} value={formatMoney(b.tax)} />
+              {b.tip > 0 && <Row label={t('bill.tip')} value={formatMoney(b.tip)} />}
               <View className="mt-2 flex-row justify-between border-t border-line pt-2">
-                <Text className="text-base font-bold text-fg">Tổng cộng</Text>
+                <Text className="text-base font-bold text-fg">{t('bill.grandTotal')}</Text>
                 <Text className="text-xl font-extrabold text-brand">{formatMoney(b.total)}</Text>
               </View>
             </>
@@ -180,14 +182,14 @@ export default function BillScreen() {
         <Button
           className="flex-1"
           variant="ghost"
-          label="Chia hoá đơn"
+          label={t('bill.split')}
           leftIcon={<Split size={18} color={color.text.primary} />}
           disabled={stale}
           onPress={() => router.push('/(app)/bill/split')}
         />
         <Button
           className="flex-1"
-          label="Thanh toán"
+          label={t('common.pay')}
           disabled={stale}
           onPress={() => {
             adj.setSplitBillIds([]);
@@ -244,6 +246,7 @@ function Presets({
   selected: number;
   onSelect: (n: number) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <View>
       <Text className="mb-2 font-semibold text-muted">{label}</Text>
@@ -258,7 +261,7 @@ function Presets({
               style={on ? { backgroundColor: 'rgba(243,112,33,0.12)' } : undefined}
             >
               <Text className={on ? 'font-bold text-brand' : 'text-muted'}>
-                {v === 0 ? 'Không' : formatMoney(v)}
+                {v === 0 ? t('common.none') : formatMoney(v)}
               </Text>
             </Pressable>
           );

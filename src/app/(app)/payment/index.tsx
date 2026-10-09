@@ -2,6 +2,7 @@
 // Đã chia bill → chọn phần cần thu trước. MVP: tiền mặt + VietQR (pos-plan Mục 3.1 Payment).
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ActivityIndicator } from 'react-native';
 import { Banknote, CheckCircle2, ChevronLeft, ChevronRight, CreditCard, QrCode } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,6 +14,7 @@ import { useBillStore } from '@/store/bill-store';
 import { useOrderStore } from '@/store/order-store';
 
 export default function Payment() {
+  const { t } = useTranslation();
   const router = useRouter();
   const active = useOrderStore((s) => s.active);
   const billId = useBillStore((s) => s.billId);
@@ -37,7 +39,7 @@ export default function Payment() {
         <Pressable onPress={() => router.back()} className="mr-2 h-10 w-10 items-center justify-center rounded-full bg-surface active:opacity-70">
           <ChevronLeft size={22} color={color.text.primary} />
         </Pressable>
-        <Text className="text-xl font-extrabold text-fg">Thanh toán</Text>
+        <Text className="text-xl font-extrabold text-fg">{t('payment.title')}</Text>
       </View>
 
       {/* Chọn phần (khi đã chia) */}
@@ -55,11 +57,11 @@ export default function Payment() {
           <ActivityIndicator color={color.brand.DEFAULT} />
         ) : (
           <>
-            <Text className="text-muted">{paid ? 'Đã thu đủ' : 'Cần thu'}</Text>
+            <Text className="text-muted">{paid ? t('payment.paidFull') : t('payment.due')}</Text>
             <Text className="mt-1 text-4xl font-extrabold text-brand">{formatMoney(paid ? b.total : due)}</Text>
             <Text className="mt-1 text-xs text-muted">
               {b.code}
-              {b.part ? ` · phần ${b.part.index + 1}/${b.part.of}` : ''} · {active.tableName ?? 'Mang về'}
+              {b.part ? ` · ${t('common.partOf', { n: b.part.index + 1, of: b.part.of })}` : ''} · {active.tableName ?? t('common.takeaway')}
             </Text>
           </>
         )}
@@ -67,9 +69,9 @@ export default function Payment() {
 
       {!paid && b && (
         <View className="gap-3 px-4">
-          <Method icon={<Banknote size={24} color={color.brand.DEFAULT} />} label="Tiền mặt" onPress={() => router.push('/(app)/payment/cash')} />
-          <Method icon={<QrCode size={24} color={color.brand.DEFAULT} />} label="VietQR" onPress={() => router.push('/(app)/payment/qr')} />
-          <Method icon={<CreditCard size={24} color={color.text.muted} />} label="Thẻ" sub="Chưa hỗ trợ — Phase 3" disabled />
+          <Method icon={<Banknote size={24} color={color.brand.DEFAULT} />} label={t('payment.cash')} onPress={() => router.push('/(app)/payment/cash')} />
+          <Method icon={<QrCode size={24} color={color.brand.DEFAULT} />} label={t('payment.qr')} onPress={() => router.push('/(app)/payment/qr')} />
+          <Method icon={<CreditCard size={24} color={color.text.muted} />} label={t('payment.card')} sub={t('payment.cardUnsupported')} disabled />
         </View>
       )}
     </SafeAreaView>
@@ -77,6 +79,7 @@ export default function Payment() {
 }
 
 function PartChip({ billId, index, selected, onPress }: { billId: string; index: number; selected: boolean; onPress: () => void }) {
+  const { t } = useTranslation();
   const b = useBill(billId).data;
   const done = b?.status === 'PAID';
   return (
@@ -87,7 +90,7 @@ function PartChip({ billId, index, selected, onPress }: { billId: string; index:
     >
       {done && <CheckCircle2 size={14} color={color.status.available} />}
       <Text className={`ml-1 font-semibold ${selected ? 'text-brand' : 'text-fg'}`}>
-        Phần {index + 1}
+        {t('common.part', { n: index + 1 })}
         {b ? ` · ${formatMoney(b.total)}` : ''}
       </Text>
     </Pressable>

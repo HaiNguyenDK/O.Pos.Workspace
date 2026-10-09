@@ -2,6 +2,7 @@
 // Chỉ liệt kê bàn đang có đơn chạy; trả về {id, version} để mergeOrders kiểm tra xung đột (pos-plan Mục 3.2).
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
@@ -15,6 +16,7 @@ export const MergeTablesSheet = forwardRef<
   MergeTablesSheetHandle,
   { currentOrderId: string; onConfirm: (sources: MergeSource[]) => void }
 >(function MergeTablesSheet({ currentOrderId, onConfirm }, ref) {
+  const { t } = useTranslation();
   const sheet = useRef<BottomSheetModal>(null);
   const running = useRunningOrders();
   const [selected, setSelected] = useState<string[]>([]);
@@ -44,9 +46,9 @@ export const MergeTablesSheet = forwardRef<
       backgroundStyle={{ backgroundColor: color.bg.surface }}
     >
       <BottomSheetView style={{ padding: 20, paddingBottom: 36, gap: 10 }}>
-        <Text className="text-xl font-extrabold text-fg">Gộp bàn</Text>
-        <Text className="mb-2 text-muted">Chọn bàn đang có khách để gộp vào đơn này</Text>
-        {targets.length === 0 && <Text className="py-6 text-center text-muted">Không có bàn nào đang có đơn</Text>}
+        <Text className="text-xl font-extrabold text-fg">{t('common.mergeTables')}</Text>
+        <Text className="mb-2 text-muted">{t('merge.hint')}</Text>
+        {targets.length === 0 && <Text className="py-6 text-center text-muted">{t('merge.empty')}</Text>}
         {targets.map((o) => {
           const on = selected.includes(o.id);
           return (
@@ -57,7 +59,7 @@ export const MergeTablesSheet = forwardRef<
               style={on ? { backgroundColor: 'rgba(243,112,33,0.15)' } : undefined}
             >
               <Text className="text-base font-bold text-fg">
-                {o.tableName} · {o.lines.filter((l) => l.status !== 'VOIDED').length} món
+                {o.tableName} · {t('common.items', { count: o.lines.filter((l) => l.status !== 'VOIDED').length })}
               </Text>
               <View className={`h-6 w-6 items-center justify-center rounded-full ${on ? 'bg-brand' : 'bg-surface'}`}>
                 {on && <Check size={16} color="#fff" />}
@@ -67,7 +69,7 @@ export const MergeTablesSheet = forwardRef<
         })}
         <Button
           className="mt-3"
-          label={`Gộp ${selected.length} bàn`}
+          label={t('merge.confirm', { count: selected.length })}
           disabled={selected.length === 0}
           onPress={() => {
             onConfirm(targets.filter((o) => selected.includes(o.id)).map((o) => ({ id: o.id, version: o.version })));

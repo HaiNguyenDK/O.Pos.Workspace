@@ -26,7 +26,7 @@ import { calcBill, calcSubtotal, taxLabel } from '@/domain/pricing';
 import { isPosApiError, type OrderLine } from '@/data/types';
 import { formatMoney } from '@/lib/format';
 import { newId } from '@/lib/id';
-import { lineLabel, lineTone } from '@/lib/status';
+import { lineLabelKey, lineTone } from '@/lib/status';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { haptics } from '@/lib/haptics';
@@ -35,7 +35,7 @@ import { toNewLine, useCartStore, type CartLine } from '@/store/cart-store';
 import { useOrderStore } from '@/store/order-store';
 import { useOfflineQueueStore } from '@/store/offline-queue-store';
 
-const VOID_REASONS = ['Khách đổi ý', 'Nhập nhầm', 'Hết món'];
+const VOID_REASON_KEYS = ['cart.voidReasons.changedMind', 'cart.voidReasons.wrongEntry', 'cart.voidReasons.outOfStock'];
 
 export default function Cart() {
   const { t } = useTranslation();
@@ -78,7 +78,7 @@ export default function Cart() {
     clearCart();
     sendKey.reset();
     haptics.warning();
-    toast.info('Đã lưu offline', 'Sẽ tự gửi bếp khi có mạng lại');
+    toast.info(t('cart.savedOffline'), t('cart.savedOfflineHint'));
   };
 
   const send = () => {
@@ -93,7 +93,7 @@ export default function Cart() {
           haptics.success();
           clearCart();
           sendKey.reset();
-          toast.success('Đã gửi bếp', `${toSend.length} món · ${active.tableName ?? 'Mang về'}`);
+          toast.success(t('cart.sent'), t('cart.sentDetail', { count: toSend.length, table: active.tableName ?? t('common.takeaway') }));
         },
         onError: (e) => {
           // Lỗi mạng giữa chừng → không biết server đã nhận chưa: xếp hàng với CÙNG key (server bỏ qua nếu trùng).
@@ -110,29 +110,29 @@ export default function Cart() {
     voidLine.mutate(
       { idempotencyKey: newId(), orderId: active.orderId, lineId: line.id, reason, approvalToken },
       {
-        onSuccess: () => toast.success('Đã huỷ món', line.name),
+        onSuccess: () => toast.success(t('cart.voided'), line.name),
         onError: (e) => toast.error(t('common.error'), (e as Error).message),
       }
     );
 
   const askVoid = (line: OrderLine) =>
-    Alert.alert(`Huỷ ${line.quantity}× ${line.name}?`, 'Chọn lý do', [
-      ...VOID_REASONS.map((reason) => ({
+    Alert.alert(t('cart.voidTitle', { qty: line.quantity, name: line.name }), t('cart.voidChooseReason'), [
+      ...VOID_REASON_KEYS.map((k) => t(k)).map((reason) => ({
         text: reason,
         onPress: () =>
           line.status === 'FIRED'
             ? doVoid(line, reason)
-            : approvalSheet.current?.request('VOID_LINE', `Bếp đã làm "${line.name}" — cần quản lý duyệt huỷ`, (a) =>
+            : approvalSheet.current?.request('VOID_LINE', t('cart.voidApproval', { name: line.name }), (a) =>
                 doVoid(line, reason, a.approvalToken)
               ),
       })),
-      { text: 'Không huỷ', style: 'cancel' },
+      { text: t('cart.voidKeep'), style: 'cancel' },
     ]);
 
   const onConflict = (e: unknown) => {
     if (isPosApiError(e) && e.code === 'VERSION_CONFLICT') {
       order.refetch();
-      toast.error('Đơn vừa thay đổi', 'Đã tải lại, vui lòng thao tác lại');
+      toast.error(t('common.orderChanged'), t('cart.reloadedRetry'));
     } else toast.error(t('common.error'), (e as Error).message);
   };
 
@@ -144,7 +144,7 @@ export default function Cart() {
           <ChevronLeft size={22} color={color.text.primary} />
         </Pressable>
         <View className="flex-1">
-          <Text className="text-xl font-extrabold text-fg">{active.tableName ?? 'Mang về'}</Text>
+          <Text className="text-xl font-extrabold text-fg">{active.tableName ?? t('common.takeaway')}</Text>
           <Text className="text-xs text-muted">
             {active.customerName}
             {order.data ? ` · ${order.data.code}` : ''}
@@ -157,11 +157,11 @@ export default function Cart() {
         <View className="mb-2 flex-row gap-3 px-4">
           <Pressable onPress={() => moveSheet.current?.present()} className="flex-1 flex-row items-center justify-center rounded-xl border border-line bg-surface py-3 active:opacity-70">
             <MoveRight size={16} color={color.text.primary} />
-            <Text className="ml-2 font-semibold text-fg">Chuyển bàn</Text>
+            <Text className="ml-2 font-semibold text-fg">{t('common.moveTable')}</Text>
           </Pressable>
           <Pressable onPress={() => mergeSheet.current?.present()} className="flex-1 flex-row items-center justify-center rounded-xl border border-line bg-surface py-3 active:opacity-70">
             <Users size={16} color={color.text.primary} />
-            <Text className="ml-2 font-semibold text-fg">Gộp bàn</Text>
+            <Text className="ml-2 font-semibold text-fg">{t('common.mergeTables')}</Text>
           </Pressable>
         </View>
       )}
@@ -171,7 +171,7 @@ export default function Cart() {
         {order.isLoading && <ActivityIndicator color={color.brand.DEFAULT} />}
         {sent.length > 0 && (
           <View className="gap-2">
-            <Text className="font-bold text-muted">Đã gửi bếp</Text>
+            <Text className="font-bold text-muted">{t('cart.sent')}</Text>
             {sent.map((l) => (
               <View key={l.id} className="flex-row items-center rounded-2xl border border-line bg-surface px-4 py-3">
                 <Text className="w-8 font-bold text-brand">{l.quantity}×</Text>
@@ -180,7 +180,7 @@ export default function Cart() {
                   {l.modifiers.length > 0 && <Text className="text-xs text-muted">{modifierText(l.modifiers)}</Text>}
                   {!!l.note && <Text className="text-xs text-muted">{l.note}</Text>}
                   <View className="mt-1">
-                    <StatusChip status={lineTone[l.status]} label={lineLabel[l.status]} />
+                    <StatusChip status={lineTone[l.status]} label={t(lineLabelKey[l.status])} />
                   </View>
                 </View>
                 <Text className="text-muted">{formatMoney(l.lineTotal)}</Text>
@@ -199,7 +199,7 @@ export default function Cart() {
           <View className="gap-2">
             <View className="flex-row items-center gap-2">
               <CloudOff size={14} color={color.status.pending} />
-              <Text className="font-bold text-muted">Chờ gửi bếp (offline)</Text>
+              <Text className="font-bold text-muted">{t('cart.queuedTitle')}</Text>
             </View>
             {queued.map((q) => (
               <View key={q.idempotencyKey} className="gap-1 rounded-2xl border border-line bg-surface px-4 py-3">
@@ -211,10 +211,10 @@ export default function Cart() {
                 {!!q.error && (
                   <View className="mt-1 flex-row items-center justify-between">
                     <Text className="flex-1 text-xs" style={{ color: color.status.cancelled }}>
-                      Không gửi được: {q.error}
+                      {t('cart.sendFailed', { error: q.error })}
                     </Text>
                     <Pressable onPress={() => removeQueued(q.idempotencyKey)} hitSlop={8} className="ml-2 active:opacity-60">
-                      <Text className="text-xs font-bold text-brand">Bỏ</Text>
+                      <Text className="text-xs font-bold text-brand">{t('cart.discard')}</Text>
                     </Pressable>
                   </View>
                 )}
@@ -225,7 +225,7 @@ export default function Cart() {
 
         {/* Món mới */}
         <View className="mt-2 gap-2">
-          <Text className="font-bold text-muted">Món mới</Text>
+          <Text className="font-bold text-muted">{t('cart.newItems')}</Text>
           {lines.length === 0 ? (
             <Text className="py-4 text-center text-muted">{t('cart.empty')}</Text>
           ) : (
@@ -261,21 +261,21 @@ export default function Cart() {
       <View className="border-t border-line px-4 py-4">
         {preview && settings && (
           <>
-            <Row label="Tạm tính" value={formatMoney(preview.subtotal)} />
-            <Row label={`Thuế (${taxLabel(settings.taxRate)})`} value={formatMoney(preview.tax)} />
+            <Row label={t('common.subtotal')} value={formatMoney(preview.subtotal)} />
+            <Row label={t('common.tax', { rate: taxLabel(settings.taxRate) })} value={formatMoney(preview.tax)} />
             <View className="mb-3 mt-1 flex-row justify-between">
-              <Text className="text-base font-bold text-fg">Tổng (tạm)</Text>
+              <Text className="text-base font-bold text-fg">{t('cart.totalPreview')}</Text>
               <Text className="text-xl font-extrabold text-brand">{formatMoney(preview.total)}</Text>
             </View>
           </>
         )}
 
         <View className="flex-row gap-3">
-          <Button className="flex-1" variant="ghost" label="Thêm món" onPress={() => router.push('/(app)/menu')} />
+          <Button className="flex-1" variant="ghost" label={t('cart.addItems')} onPress={() => router.push('/(app)/menu')} />
           {hasNew ? (
             <Button className="flex-1" label={t('cart.sendToKitchen')} onPress={send} loading={addLines.isPending} />
           ) : (
-            <Button className="flex-1" variant="cart" label="Thanh toán" onPress={() => router.push('/(app)/bill')} disabled={!canPay} />
+            <Button className="flex-1" variant="cart" label={t('common.pay')} onPress={() => router.push('/(app)/bill')} disabled={!canPay} />
           )}
         </View>
       </View>
@@ -290,7 +290,7 @@ export default function Cart() {
             {
               onSuccess: (o) => {
                 setActive({ ...active, tableId: o.tableId, tableName: o.tableName });
-                toast.success('Đã chuyển bàn', o.tableName);
+                toast.success(t('cart.moved'), o.tableName);
               },
               onError: onConflict,
             }
@@ -309,7 +309,7 @@ export default function Cart() {
               expectedVersions: sources.map((s) => s.version),
             },
             {
-              onSuccess: () => toast.success('Đã gộp bàn', `${sources.length} bàn`),
+              onSuccess: () => toast.success(t('cart.merged'), t('common.tables', { count: sources.length })),
               onError: onConflict,
             }
           )

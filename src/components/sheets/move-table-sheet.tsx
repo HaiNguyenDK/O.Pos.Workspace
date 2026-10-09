@@ -1,6 +1,7 @@
 // src/components/sheets/move-table-sheet.tsx — chuyển đơn sang bàn khác (chọn bàn trống).
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useImperativeHandle, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Users } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
 import { useTables } from '@/data/queries';
@@ -12,6 +13,7 @@ export const MoveTableSheet = forwardRef<
   MoveTableSheetHandle,
   { currentTableId?: string; onSelect: (tableId: string) => void }
 >(function MoveTableSheet({ currentTableId, onSelect }, ref) {
+  const { t: tr } = useTranslation();
   const sheet = useRef<BottomSheetModal>(null);
   const tables = useTables();
   useImperativeHandle(ref, () => ({ present: () => sheet.current?.present() }));
@@ -34,9 +36,9 @@ export const MoveTableSheet = forwardRef<
       backgroundStyle={{ backgroundColor: color.bg.surface }}
     >
       <BottomSheetView style={{ padding: 20, paddingBottom: 36, gap: 10 }}>
-        <Text className="text-xl font-extrabold text-fg">Chuyển bàn</Text>
-        <Text className="mb-2 text-muted">Chọn bàn trống để chuyển đơn</Text>
-        {targets.length === 0 && <Text className="py-6 text-center text-muted">Không có bàn trống</Text>}
+        <Text className="text-xl font-extrabold text-fg">{tr('common.moveTable')}</Text>
+        <Text className="mb-2 text-muted">{tr('move.hint')}</Text>
+        {targets.length === 0 && <Text className="py-6 text-center text-muted">{tr('move.empty')}</Text>}
         {targets.map((t) => (
           <Pressable
             key={t.id}

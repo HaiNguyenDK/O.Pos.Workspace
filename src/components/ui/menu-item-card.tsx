@@ -1,6 +1,7 @@
 // src/components/ui/menu-item-card.tsx — thẻ món (grid 2 cột). Gradient từ imageGradient, quick add.
 import { LinearGradient } from 'expo-linear-gradient';
 import { Plus } from 'lucide-react-native';
+import { useTranslation } from 'react-i18next';
 import { Pressable, Text, View } from '@/tw';
 import { parseGradient } from '@/lib/gradient';
 import { formatMoney } from '@/lib/format';
@@ -18,6 +19,7 @@ export function MenuItemCard({
   onPress?: () => void;
   onQuickAdd?: () => void;
 }) {
+  const { t } = useTranslation();
   const g = parseGradient(item.imageGradient);
   const soldOut = !item.isAvailable;
 
@@ -50,7 +52,7 @@ export function MenuItemCard({
             <Plus size={18} color="#fff" />
           </Pressable>
         </View>
-        <Text className="mt-1 text-[10px] text-muted">{soldOut ? 'Hết món' : ' '}</Text>
+        <Text className="mt-1 text-[10px] text-muted">{soldOut ? t('menu.soldOut') : ' '}</Text>
       </View>
     </Pressable>
   );
