@@ -5,6 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
 import { api } from '@/data/api';
 import { apiSession, type ApiSession } from '@/data/api/session';
+import { loadDeviceId } from '@/lib/device';
 import type { Staff } from '@/data/types';
 
 const SESSION_KEY = 'pos.auth.session';
@@ -32,6 +33,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Timeout chống treo: nếu SecureStore không phản hồi (một số máy Sunmi/keystore
     // chậm), vẫn coi như hydrated để app không kẹt splash.
     try {
+      loadDeviceId().catch(() => {}); // không chặn splash; chỉ cần cho chế độ GraphQL
       const raw = await Promise.race<string | null>([
         SecureStore.getItemAsync(SESSION_KEY),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),

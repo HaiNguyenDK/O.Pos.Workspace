@@ -19,6 +19,17 @@ bunx tsc --noEmit -p .          # typecheck
 
 Mặc định chạy với **mock API** (`EXPO_PUBLIC_API_MODE=mock`) — mock đóng vai server theo contract (idempotency, version, server tính tiền, thanh toán). PIN thử: `111111` phục vụ, `222222` thu ngân, `999999` quản lý (dùng để duyệt).
 
+### Chế độ GraphQL (BE passiontech)
+
+Copy `.env.example` → `.env.local`, đặt `EXPO_PUBLIC_API_MODE=graphql` và điền URL router, tenant, chi nhánh.
+
+| Phần | Nguồn |
+|---|---|
+| Menu (danh mục + món), thông tin chi nhánh | **BE thật** — `categoryServiceAllCategories`, `productServiceSearchProducts`, `entityServiceBranchById` |
+| PIN, bàn, đơn, bếp, bill, thanh toán | **Mock** — BE chưa có (xem `docs/pos/pos-be-api-request.md`) |
+
+Vì PIN vẫn là mock, gọi BE cần `EXPO_PUBLIC_DEV_ACCESS_TOKEN` (token từ REST portal login + select-tenant) — **chỉ dùng khi dev**, không đặt khi build phát hành. Ánh xạ BE → contract ở `src/data/api/graphql.ts`: giá Float làm tròn tới đồng, product nhiều variant → nhóm "Loại" bắt buộc chọn 1, chỉ nhận món VND.
+
 ## Cấu trúc
 
 | Thư mục | Nội dung |

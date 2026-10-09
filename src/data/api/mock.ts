@@ -14,6 +14,7 @@ import {
   type ApprovalAction,
   type Bill,
   type DiningTable,
+  type MenuItem,
   type Discount,
   type Order,
   type OrderLine,
@@ -43,6 +44,12 @@ const approvedDiscounts = new Map<string, { type: Discount['type']; value: numbe
 const idemStore = new Map<string, { payload: string; result: unknown }>();
 let pinFails = 0;
 let pinLockedUntil = 0;
+
+/** Catalog món mà "server" mock nhận — mặc định menu mock; adapter GraphQL nạp menu BE thật vào đây. */
+const menuCatalog = new Map<string, MenuItem>(db.menuItems.map((m) => [m.id, m]));
+export function registerMenu(items: MenuItem[]) {
+  for (const m of items) menuCatalog.set(m.id, m);
+}
 
 let seq = 100;
 const nextCode = (prefix: string) => `${prefix}-${String(++seq).padStart(4, '0')}`;
@@ -391,7 +398,7 @@ export const mockPosApi: PosApi = {
       if (fresh.length === 0) return o;
       const firedAt = now();
       const created = fresh.map((l): OrderLine => {
-        const m = db.menuItems.find((x) => x.id === l.menuItemId);
+        const m = menuCatalog.get(l.menuItemId);
         if (!m) throw new PosApiError('NOT_FOUND', 'Món không tồn tại');
         if (!m.isAvailable) throw new PosApiError('ITEM_UNAVAILABLE', `${m.name} đã hết`);
         if (!Number.isInteger(l.quantity) || l.quantity <= 0) throw new PosApiError('VALIDATION', 'Số lượng không hợp lệ');
