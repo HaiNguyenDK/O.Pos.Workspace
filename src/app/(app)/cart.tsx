@@ -21,6 +21,7 @@ import {
   useOrder,
   useVoidLine,
 } from '@/data/queries';
+import { modifierText } from '@/domain/modifiers';
 import { calcBill, calcSubtotal, taxLabel } from '@/domain/pricing';
 import { isPosApiError, type OrderLine } from '@/data/types';
 import { formatMoney } from '@/lib/format';
@@ -176,6 +177,7 @@ export default function Cart() {
                 <Text className="w-8 font-bold text-brand">{l.quantity}×</Text>
                 <View className="flex-1">
                   <Text className="font-semibold text-fg">{l.name}</Text>
+                  {l.modifiers.length > 0 && <Text className="text-xs text-muted">{modifierText(l.modifiers)}</Text>}
                   {!!l.note && <Text className="text-xs text-muted">{l.note}</Text>}
                   <View className="mt-1">
                     <StatusChip status={lineTone[l.status]} label={lineLabel[l.status]} />
@@ -203,7 +205,7 @@ export default function Cart() {
               <View key={q.idempotencyKey} className="gap-1 rounded-2xl border border-line bg-surface px-4 py-3">
                 {q.lines.map((l) => (
                   <Text key={l.lineId} className="text-fg">
-                    {l.quantity}× {l.name}
+                    {l.quantity}× {l.name}{l.modifiers.length > 0 ? ` (${modifierText(l.modifiers)})` : ''}
                   </Text>
                 ))}
                 {!!q.error && (
@@ -232,6 +234,7 @@ export default function Cart() {
                 <View className="flex-row items-center">
                   <View className="flex-1">
                     <Text className="font-semibold text-fg">{l.name}</Text>
+                    {l.modifiers.length > 0 && <Text className="text-xs text-muted">{modifierText(l.modifiers)}</Text>}
                     {!!l.note && <Text className="text-xs text-muted">{l.note}</Text>}
                     <Text className="mt-0.5 text-brand">{formatMoney(calcSubtotal([l]))}</Text>
                   </View>

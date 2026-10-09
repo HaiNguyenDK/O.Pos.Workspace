@@ -62,12 +62,31 @@ const item = (
   imageGradient,
 });
 
+const opt = (id: string, name: string, priceDelta = 0) => ({ id, name, priceDelta });
+
 export const menuItems: MenuItem[] = [
-  item('m1', 'c1', 'Phở bò tái', 'Phở bò truyền thống, nước dùng hầm xương', 65000, '🍜', 'linear-gradient(135deg, #F37021, #7c2d12)'),
+  {
+    ...item('m1', 'c1', 'Phở bò tái', 'Phở bò truyền thống, nước dùng hầm xương', 65000, '🍜', 'linear-gradient(135deg, #F37021, #7c2d12)'),
+    modifierGroups: [
+      { id: 'g-size', name: 'Size', min: 1, max: 1, options: [opt('o-thuong', 'Thường'), opt('o-dacbiet', 'Đặc biệt', 15000)] },
+      { id: 'g-them', name: 'Thêm', min: 0, max: 2, options: [opt('o-thembo', 'Thêm bò', 20000), opt('o-thembanh', 'Thêm bánh', 5000)] },
+    ],
+  },
   item('m2', 'c1', 'Cơm gà xối mỡ', 'Gà chiên giòn, cơm chiên vàng', 55000, '🍗', 'linear-gradient(135deg, #f59e0b, #78350f)'),
   item('m3', 'c2', 'Gỏi cuốn', 'Tôm thịt, rau sống, chấm mắm nêm', 35000, '🥢', 'linear-gradient(135deg, #22c55e, #14532d)'),
-  item('m4', 'c3', 'Trà đào cam sả', 'Giải nhiệt, thơm mát', 30000, '🧋', 'linear-gradient(135deg, #f97316, #b45309)', 'BAR'),
-  item('m5', 'c3', 'Cà phê sữa đá', 'Cà phê phin đậm đà', 25000, '☕', 'linear-gradient(135deg, #78350f, #1c1917)', 'BAR'),
+  {
+    ...item('m4', 'c3', 'Trà đào cam sả', 'Giải nhiệt, thơm mát', 30000, '🧋', 'linear-gradient(135deg, #f97316, #b45309)', 'BAR'),
+    modifierGroups: [
+      { id: 'g-topping', name: 'Topping', min: 0, max: 3, options: [opt('o-tranchau', 'Trân châu', 8000), opt('o-thach', 'Thạch đào', 6000), opt('o-kem', 'Kem cheese', 10000)] },
+    ],
+  },
+  {
+    ...item('m5', 'c3', 'Cà phê sữa đá', 'Cà phê phin đậm đà', 25000, '☕', 'linear-gradient(135deg, #78350f, #1c1917)', 'BAR'),
+    modifierGroups: [
+      { id: 'g-duong', name: 'Đường', min: 1, max: 1, options: [opt('o-duong-bt', 'Bình thường'), opt('o-it-duong', 'Ít đường'), opt('o-ko-duong', 'Không đường')] },
+      { id: 'g-da', name: 'Đá', min: 0, max: 1, options: [opt('o-it-da', 'Ít đá'), opt('o-ko-da', 'Không đá')] },
+    ],
+  },
   item('m6', 'c4', 'Bánh flan', 'Mềm mịn, caramel', 20000, '🍮', 'linear-gradient(135deg, #fbbf24, #92400e)', 'DESSERT'),
 ];
 
@@ -167,6 +186,7 @@ function paidBill(
       lineId: l.id,
       name: l.name,
       quantity: l.quantity,
+      modifiers: l.modifiers.map((x) => x.name),
       unitPrice: lineUnitPrice(l),
       lineTotal: l.lineTotal,
     })),

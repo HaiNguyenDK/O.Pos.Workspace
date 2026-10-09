@@ -5,6 +5,7 @@ import * as db from '@/data/mocks';
 import { apiSession } from '@/data/api/session';
 import type { PosApi } from '@/data/api/PosApi';
 import { calcBill, lineTotal, lineUnitPrice, type DiscountRule } from '@/domain/pricing';
+import { resolveModifiers } from '@/domain/modifiers';
 import { computeSplit } from '@/domain/split';
 import { newId } from '@/lib/id';
 import {
@@ -152,6 +153,7 @@ function buildBill(
       lineId: l.id,
       name: l.name,
       quantity: l.quantity,
+      modifiers: l.modifiers.map((x) => x.name),
       unitPrice: lineUnitPrice(l),
       lineTotal: l.lineTotal,
       note: l.note,
@@ -393,7 +395,9 @@ export const mockPosApi: PosApi = {
         if (!m) throw new PosApiError('NOT_FOUND', 'Món không tồn tại');
         if (!m.isAvailable) throw new PosApiError('ITEM_UNAVAILABLE', `${m.name} đã hết`);
         if (!Number.isInteger(l.quantity) || l.quantity <= 0) throw new PosApiError('VALIDATION', 'Số lượng không hợp lệ');
-        const base = { unitPrice: m.price, modifiers: [], quantity: l.quantity };
+        const { modifiers, error } = resolveModifiers(m, l.modifierOptionIds);
+        if (error) throw new PosApiError('VALIDATION', `${m.name}: ${error}`);
+        const base = { unitPrice: m.price, modifiers, quantity: l.quantity };
         return { id: l.lineId, menuItemId: m.id, name: m.name, ...base, note: l.note, lineTotal: lineTotal(base), status: 'FIRED', firedAt };
       });
       reopenIfBilling(o);

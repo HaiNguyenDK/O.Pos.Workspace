@@ -8,6 +8,7 @@ import { ChevronLeft, Minus, Plus } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
 import { useBill, useBranchSettings, useOrder, useSplitBill } from '@/data/queries';
+import { modifierText } from '@/domain/modifiers';
 import { computeSplit } from '@/domain/split';
 import { isPosApiError, type SplitPlan } from '@/data/types';
 import { formatMoney } from '@/lib/format';
@@ -110,6 +111,7 @@ export default function BillSplit() {
                   </View>
                   <View className="ml-3 flex-1">
                     <Text className="font-semibold text-fg">{l.quantity}× {l.name}</Text>
+                    {l.modifiers.length > 0 && <Text className="text-xs text-muted">{modifierText(l.modifiers)}</Text>}
                     {!!l.note && <Text className="text-xs text-muted">{l.note}</Text>}
                   </View>
                   <Text className="text-muted">{formatMoney(l.lineTotal)}</Text>

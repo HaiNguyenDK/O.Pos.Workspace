@@ -10,6 +10,7 @@ import { ModifierSheet, type ModifierSheetHandle } from '@/components/sheets/mod
 import { ErrorState } from '@/components/ui/error-state';
 import { useMenu } from '@/data/queries';
 import { color } from '@/lib/theme';
+import { needsModifierChoice } from '@/domain/modifiers';
 import { calcSubtotal } from '@/domain/pricing';
 import { formatMoney } from '@/lib/format';
 import { haptics } from '@/lib/haptics';
@@ -37,7 +38,9 @@ export default function Menu() {
   const cartCount = lines.reduce((n, l) => n + l.quantity, 0);
   const qtyOf = (id: string) => lines.filter((l) => l.menuItemId === id).reduce((n, l) => n + l.quantity, 0);
 
+  // Món có nhóm bắt buộc (vd size) → mở sheet chọn thay vì thêm nhanh.
   const quickAdd = (item: MenuItem) => {
+    if (needsModifierChoice(item)) return modifier.current?.present(item);
     haptics.light();
     addItem(item, 1);
     toast.success('Đã thêm', item.name);
@@ -120,9 +123,9 @@ export default function Menu() {
         </View>
       )}
 
-      <ModifierSheet ref={modifier} onAdd={(item, qty, note) => {
+      <ModifierSheet ref={modifier} onAdd={(item, qty, note, modifiers) => {
         haptics.light();
-        addItem(item, qty, note);
+        addItem(item, qty, note, modifiers);
         toast.success('Đã thêm', `${item.name} ×${qty}`);
       }} />
     </SafeAreaView>

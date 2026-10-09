@@ -48,6 +48,7 @@ export function formatReceipt(bill: Bill, shop: ShopInfo = { name: 'KOPAG POS' }
   for (const it of bill.lines) {
     out.push(`${it.quantity}x ${it.name}`);
     out.push(lr('', formatMoney(it.lineTotal)));
+    if (it.modifiers.length > 0) out.push(`   + ${it.modifiers.join(', ')}`);
     if (it.note) out.push(`   (${it.note})`);
   }
 

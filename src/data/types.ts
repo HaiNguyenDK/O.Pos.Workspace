@@ -115,6 +115,7 @@ export type BillLine = {
   lineId: string;
   name: string;
   quantity: number;
+  modifiers: string[]; // tên lựa chọn, vd ["Đặc biệt", "Thêm bò"]
   unitPrice: Money; // đã gồm modifier
   lineTotal: Money;
   note?: string;

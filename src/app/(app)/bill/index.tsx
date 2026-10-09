@@ -101,6 +101,7 @@ export default function BillScreen() {
                 <Text className="w-8 font-bold text-brand">{l.quantity}×</Text>
                 <View className="flex-1">
                   <Text className="font-semibold text-fg">{l.name}</Text>
+                  {l.modifiers.length > 0 && <Text className="text-xs text-muted">{l.modifiers.join(', ')}</Text>}
                   {!!l.note && <Text className="text-xs text-muted">{l.note}</Text>}
                 </View>
                 <Text className="text-muted">{formatMoney(l.lineTotal)}</Text>
