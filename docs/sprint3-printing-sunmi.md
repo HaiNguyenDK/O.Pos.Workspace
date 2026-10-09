@@ -15,8 +15,8 @@
 Vì đã thêm native module + dependency Maven, **phải build lại native** (không phải chỉ reload JS):
 
 ```powershell
-cd pos-mobile
-npx expo run:android        # tự prebuild, autolink module sunmi-printer, tải com.sunmi:printerlibrary, cài lên máy
+cd O.Pos.Workspace
+bunx expo run:android       # tự prebuild, autolink module sunmi-printer, tải com.sunmi:printerlibrary, cài lên máy
 ```
 - Lần đầu Gradle sẽ tải `com.sunmi:printerlibrary` từ Maven Central (cần mạng).
 - Sau khi cài: mở app → PIN → tạo đơn → gửi bếp → thanh toán → **In bill**; hoặc Settings → **In thử**.
