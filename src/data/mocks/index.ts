@@ -1,203 +1,227 @@
-// src/data/mocks/index.ts — mock data build TỪ Shared Contract (D1: không có web prototype).
-// Đủ để chạy Sprint 0. Mở rộng khi làm màn mới. Tiền tệ: VND.
+// src/data/mocks/index.ts — mock data dựng TỪ Shared Contract (pos-plan Mục 3.1; D1).
+// Đủ để chạy toàn luồng. Tiền tệ: VND số nguyên (D4).
+import { calcBill, lineTotal, lineUnitPrice } from '@/domain/pricing';
 import type {
   AppNotification,
   Bill,
+  Branch,
+  Customer,
   DiningTable,
   MenuCategory,
   MenuItem,
   Order,
+  OrderLine,
+  PaymentMethod,
   Staff,
 } from '@/data/types';
 
-export const staff: Staff[] = [
-  { id: 's1', name: 'Nguyễn Văn A', role: 'waiter' },
-  { id: 's2', name: 'Trần Thị B', role: 'cashier' },
+export const BRANCH_ID = 'br1';
+
+export const branch: Branch = {
+  id: BRANCH_ID,
+  name: 'Kopag — Chi nhánh 1',
+  address: '12 Lê Lợi, Q.1, TP.HCM',
+  phone: '028 3822 0000',
+  // ⏳ taxRate / pricesIncludeTax chờ kế toán chốt (pos-plan Mục 8 #4).
+  settings: { taxRate: 0.1, pricesIncludeTax: false, serviceChargeRate: 0.05, cashRounding: 0 },
+};
+
+/** PIN mock: mỗi nhân viên một PIN 6 số, duy nhất trong chi nhánh. */
+export const staff: (Staff & { pin: string })[] = [
+  { id: 's1', name: 'Nguyễn Văn A', role: 'WAITER', branchId: BRANCH_ID, pin: '111111' },
+  { id: 's2', name: 'Trần Thị B', role: 'CASHIER', branchId: BRANCH_ID, pin: '222222' },
+  { id: 's3', name: 'Lê Quản Lý', role: 'MANAGER', branchId: BRANCH_ID, pin: '999999' },
 ];
 
 export const categories: MenuCategory[] = [
-  { id: 'c1', name: 'Món chính' },
-  { id: 'c2', name: 'Khai vị' },
-  { id: 'c3', name: 'Đồ uống' },
-  { id: 'c4', name: 'Tráng miệng' },
+  { id: 'c1', name: 'Món chính', sortOrder: 1 },
+  { id: 'c2', name: 'Khai vị', sortOrder: 2 },
+  { id: 'c3', name: 'Đồ uống', sortOrder: 3 },
+  { id: 'c4', name: 'Tráng miệng', sortOrder: 4 },
 ];
+
+const item = (
+  id: string,
+  categoryId: string,
+  name: string,
+  description: string,
+  price: number,
+  emoji: string,
+  imageGradient: string,
+  station: MenuItem['station'] = 'KITCHEN'
+): MenuItem => ({
+  id,
+  categoryId,
+  name,
+  description,
+  price,
+  isAvailable: true,
+  station,
+  modifierGroups: [],
+  emoji,
+  imageGradient,
+});
 
 export const menuItems: MenuItem[] = [
-  {
-    id: 'm1',
-    categoryId: 'c1',
-    name: 'Phở bò tái',
-    description: 'Phở bò truyền thống, nước dùng hầm xương',
-    price: 65000,
-    available: 40,
-    sold: 128,
-    emoji: '🍜',
-    imageGradient: 'linear-gradient(135deg, #F37021, #7c2d12)',
-  },
-  {
-    id: 'm2',
-    categoryId: 'c1',
-    name: 'Cơm gà xối mỡ',
-    description: 'Gà chiên giòn, cơm chiên vàng',
-    price: 55000,
-    available: 30,
-    sold: 96,
-    emoji: '🍗',
-    imageGradient: 'linear-gradient(135deg, #f59e0b, #78350f)',
-  },
-  {
-    id: 'm3',
-    categoryId: 'c2',
-    name: 'Gỏi cuốn',
-    description: 'Tôm thịt, rau sống, chấm mắm nêm',
-    price: 35000,
-    available: 25,
-    sold: 64,
-    emoji: '🥢',
-    imageGradient: 'linear-gradient(135deg, #22c55e, #14532d)',
-  },
-  {
-    id: 'm4',
-    categoryId: 'c3',
-    name: 'Trà đào cam sả',
-    description: 'Giải nhiệt, thơm mát',
-    price: 30000,
-    available: 50,
-    sold: 210,
-    emoji: '🧋',
-    imageGradient: 'linear-gradient(135deg, #f97316, #b45309)',
-  },
-  {
-    id: 'm5',
-    categoryId: 'c3',
-    name: 'Cà phê sữa đá',
-    description: 'Cà phê phin đậm đà',
-    price: 25000,
-    available: 80,
-    sold: 342,
-    emoji: '☕',
-    imageGradient: 'linear-gradient(135deg, #78350f, #1c1917)',
-  },
-  {
-    id: 'm6',
-    categoryId: 'c4',
-    name: 'Bánh flan',
-    description: 'Mềm mịn, caramel',
-    price: 20000,
-    available: 18,
-    sold: 77,
-    emoji: '🍮',
-    imageGradient: 'linear-gradient(135deg, #fbbf24, #92400e)',
-  },
+  item('m1', 'c1', 'Phở bò tái', 'Phở bò truyền thống, nước dùng hầm xương', 65000, '🍜', 'linear-gradient(135deg, #F37021, #7c2d12)'),
+  item('m2', 'c1', 'Cơm gà xối mỡ', 'Gà chiên giòn, cơm chiên vàng', 55000, '🍗', 'linear-gradient(135deg, #f59e0b, #78350f)'),
+  item('m3', 'c2', 'Gỏi cuốn', 'Tôm thịt, rau sống, chấm mắm nêm', 35000, '🥢', 'linear-gradient(135deg, #22c55e, #14532d)'),
+  item('m4', 'c3', 'Trà đào cam sả', 'Giải nhiệt, thơm mát', 30000, '🧋', 'linear-gradient(135deg, #f97316, #b45309)', 'BAR'),
+  item('m5', 'c3', 'Cà phê sữa đá', 'Cà phê phin đậm đà', 25000, '☕', 'linear-gradient(135deg, #78350f, #1c1917)', 'BAR'),
+  item('m6', 'c4', 'Bánh flan', 'Mềm mịn, caramel', 20000, '🍮', 'linear-gradient(135deg, #fbbf24, #92400e)', 'DESSERT'),
 ];
 
+const table = (
+  id: string,
+  name: string,
+  seats: number,
+  size: DiningTable['size'],
+  zone: string,
+  status: DiningTable['status'] = 'AVAILABLE',
+  currentOrderId?: string
+): DiningTable => ({ id, branchId: BRANCH_ID, name, seats, size, zone, status, currentOrderId });
+
 export const tables: DiningTable[] = [
-  { id: 't1', name: 'Bàn 1', seats: 2, status: 'available', size: 'small', zone: 'Tầng 1' },
-  { id: 't2', name: 'Bàn 2', seats: 4, status: 'occupied', size: 'large', zone: 'Tầng 1' },
-  { id: 't3', name: 'Bàn 3', seats: 4, status: 'reserved', size: 'large', zone: 'Tầng 1' },
-  { id: 't4', name: 'Bàn 4', seats: 2, status: 'available', size: 'small', zone: 'Tầng 1' },
-  { id: 't5', name: 'Bàn 5', seats: 6, status: 'occupied', size: 'large', zone: 'Sân vườn' },
-  { id: 't6', name: 'Bàn 6', seats: 2, status: 'available', size: 'small', zone: 'Sân vườn' },
-  { id: 't7', name: 'VIP 1', seats: 8, status: 'reserved', size: 'large', zone: 'Phòng VIP' },
-  { id: 't8', name: 'VIP 2', seats: 8, status: 'available', size: 'large', zone: 'Phòng VIP' },
+  table('t1', 'Bàn 1', 2, 'SMALL', 'Tầng 1'),
+  table('t2', 'Bàn 2', 4, 'LARGE', 'Tầng 1', 'OCCUPIED', 'o1'),
+  table('t3', 'Bàn 3', 4, 'LARGE', 'Tầng 1', 'RESERVED'),
+  table('t4', 'Bàn 4', 2, 'SMALL', 'Tầng 1'),
+  table('t5', 'Bàn 5', 6, 'LARGE', 'Sân vườn', 'OCCUPIED', 'o2'),
+  table('t6', 'Bàn 6', 2, 'SMALL', 'Sân vườn'),
+  table('t7', 'VIP 1', 8, 'LARGE', 'Phòng VIP', 'RESERVED'),
+  table('t8', 'VIP 2', 8, 'LARGE', 'Phòng VIP'),
 ];
+
+const menuById = (id: string) => menuItems.find((m) => m.id === id)!;
+
+export function mkLine(
+  id: string,
+  menuItemId: string,
+  quantity: number,
+  firedAt: string,
+  status: OrderLine['status'] = 'FIRED',
+  note?: string
+): OrderLine {
+  const m = menuById(menuItemId);
+  const base = { unitPrice: m.price, modifiers: [], quantity };
+  return { id, menuItemId, name: m.name, ...base, note, lineTotal: lineTotal(base), status, firedAt };
+}
 
 export const orders: Order[] = [
   {
     id: 'o1',
     code: 'DH-0012',
+    branchId: BRANCH_ID,
     customerName: 'Khách bàn 2',
     tableId: 't2',
     tableName: 'Bàn 2',
-    items: [
-      { menuItemId: 'm1', name: 'Phở bò tái', price: 65000, quantity: 2 },
-      { menuItemId: 'm5', name: 'Cà phê sữa đá', price: 25000, quantity: 2 },
+    mode: 'DINE_IN',
+    guests: 4,
+    status: 'OPEN',
+    lines: [
+      mkLine('l-o1-1', 'm1', 2, '2026-07-20T10:16:00.000Z', 'PREPARING'),
+      mkLine('l-o1-2', 'm5', 2, '2026-07-20T10:16:00.000Z', 'READY'),
     ],
-    subtotal: 180000,
-    tax: 18000,
-    total: 198000,
-    status: 'preparing',
-    mode: 'dine-in',
+    version: 3,
+    openedBy: 's1',
     createdAt: '2026-07-20T10:15:00.000Z',
     updatedAt: '2026-07-20T10:20:00.000Z',
   },
   {
     id: 'o2',
     code: 'DH-0013',
+    branchId: BRANCH_ID,
     customerName: 'Khách bàn 5',
     tableId: 't5',
     tableName: 'Bàn 5',
-    items: [{ menuItemId: 'm2', name: 'Cơm gà xối mỡ', price: 55000, quantity: 3 }],
-    subtotal: 165000,
-    tax: 16500,
-    total: 181500,
-    status: 'ready',
-    mode: 'dine-in',
+    mode: 'DINE_IN',
+    guests: 3,
+    status: 'OPEN',
+    lines: [mkLine('l-o2-1', 'm2', 3, '2026-07-20T10:31:00.000Z', 'READY')],
+    version: 2,
+    openedBy: 's1',
     createdAt: '2026-07-20T10:30:00.000Z',
     updatedAt: '2026-07-20T10:40:00.000Z',
   },
 ];
 
+/** Bill đã thanh toán cho lịch sử — số tiền tính qua domain/pricing để luôn khớp công thức. */
+function paidBill(
+  n: number,
+  tableName: string,
+  customerName: string,
+  items: [menuItemId: string, qty: number][],
+  method: PaymentMethod,
+  paidAt: string
+): Bill {
+  const lines = items.map(([mid, qty], i) => mkLine(`l-h${n}-${i}`, mid, qty, paidAt, 'SERVED'));
+  const p = calcBill(lines, branch.settings);
+  const id = `b${n}`;
+  return {
+    id,
+    code: `HD-${String(n + 8).padStart(4, '0')}`,
+    orderId: `oh${n}`,
+    tableName,
+    customerName,
+    lines: lines.map((l) => ({
+      lineId: l.id,
+      name: l.name,
+      quantity: l.quantity,
+      unitPrice: lineUnitPrice(l),
+      lineTotal: l.lineTotal,
+    })),
+    subtotal: p.subtotal,
+    discounts: [],
+    discountTotal: 0,
+    serviceCharge: 0,
+    taxRate: branch.settings.taxRate,
+    tax: p.tax,
+    tip: 0,
+    total: p.total,
+    paidAmount: p.total,
+    status: 'PAID',
+    payments: [
+      {
+        id: `p${n}`,
+        billId: id,
+        clientRef: `seed-${n}`,
+        method,
+        amount: p.total,
+        status: 'SUCCEEDED',
+        confirmedBy: method === 'CASH' ? 'STAFF' : 'PROVIDER',
+        createdAt: paidAt,
+        succeededAt: paidAt,
+      },
+    ],
+    createdAt: paidAt,
+    paidAt,
+  };
+}
+
 export const bills: Bill[] = [
-  {
-    id: 'b1',
-    code: 'HD-0009',
-    orderId: 'o0',
-    customerName: 'Khách lẻ',
-    tableName: 'Bàn 1',
-    tableCode: 't1',
-    items: [{ menuItemId: 'm4', name: 'Trà đào cam sả', price: 30000, quantity: 2 }],
-    subtotal: 60000,
-    tax: 6000,
-    total: 66000,
-    paymentMethod: 'cash',
-    paidAt: '2026-07-20T09:50:00.000Z',
-  },
-  {
-    id: 'b2', code: 'HD-0010', orderId: 'o10', customerName: 'Anh Minh', tableName: 'Bàn 3', tableCode: 't3',
-    items: [{ menuItemId: 'm1', name: 'Phở bò tái', price: 65000, quantity: 3 }],
-    subtotal: 195000, tax: 19500, total: 214500, paymentMethod: 'qr', paidAt: '2026-07-20T10:05:00.000Z',
-  },
-  {
-    id: 'b3', code: 'HD-0011', orderId: 'o11', customerName: 'Chị Lan', tableName: 'VIP 1', tableCode: 't7',
-    items: [{ menuItemId: 'm2', name: 'Cơm gà xối mỡ', price: 55000, quantity: 4 }, { menuItemId: 'm5', name: 'Cà phê sữa đá', price: 25000, quantity: 4 }],
-    subtotal: 320000, tax: 32000, total: 352000, paymentMethod: 'card', paidAt: '2026-07-20T10:22:00.000Z',
-  },
-  {
-    id: 'b4', code: 'HD-0012', orderId: 'o12', customerName: 'Khách lẻ', tableName: 'Bàn 6', tableCode: 't6',
-    items: [{ menuItemId: 'm4', name: 'Trà đào cam sả', price: 30000, quantity: 2 }, { menuItemId: 'm6', name: 'Bánh flan', price: 20000, quantity: 3 }],
-    subtotal: 120000, tax: 12000, total: 132000, paymentMethod: 'cash', paidAt: '2026-07-20T10:35:00.000Z',
-  },
-  {
-    id: 'b5', code: 'HD-0013', orderId: 'o13', customerName: 'Anh Tú', tableName: 'Bàn 2', tableCode: 't2',
-    items: [{ menuItemId: 'm3', name: 'Gỏi cuốn', price: 35000, quantity: 2 }],
-    subtotal: 70000, tax: 7000, total: 77000, paymentMethod: 'qr', paidAt: '2026-07-20T10:48:00.000Z',
-  },
-  {
-    id: 'b6', code: 'HD-0014', orderId: 'o14', customerName: 'Chị Hoa', tableName: 'Sân vườn', tableCode: 't5',
-    items: [{ menuItemId: 'm1', name: 'Phở bò tái', price: 65000, quantity: 2 }, { menuItemId: 'm4', name: 'Trà đào cam sả', price: 30000, quantity: 2 }],
-    subtotal: 190000, tax: 19000, total: 209000, paymentMethod: 'ewallet', paidAt: '2026-07-20T11:02:00.000Z',
-  },
-  {
-    id: 'b7', code: 'HD-0015', orderId: 'o15', customerName: 'Khách lẻ', tableName: 'Bàn 4', tableCode: 't4',
-    items: [{ menuItemId: 'm5', name: 'Cà phê sữa đá', price: 25000, quantity: 6 }],
-    subtotal: 150000, tax: 15000, total: 165000, paymentMethod: 'cash', paidAt: '2026-07-20T11:15:00.000Z',
-  },
-  {
-    id: 'b8', code: 'HD-0016', orderId: 'o16', customerName: 'Anh Bảo', tableName: 'VIP 2', tableCode: 't8',
-    items: [{ menuItemId: 'm2', name: 'Cơm gà xối mỡ', price: 55000, quantity: 5 }, { menuItemId: 'm6', name: 'Bánh flan', price: 20000, quantity: 5 }],
-    subtotal: 375000, tax: 37500, total: 412500, paymentMethod: 'card', paidAt: '2026-07-20T11:28:00.000Z',
-  },
-  {
-    id: 'b9', code: 'HD-0017', orderId: 'o17', customerName: 'Chị Mai', tableName: 'Bàn 1', tableCode: 't1',
-    items: [{ menuItemId: 'm3', name: 'Gỏi cuốn', price: 35000, quantity: 3 }, { menuItemId: 'm4', name: 'Trà đào cam sả', price: 30000, quantity: 3 }],
-    subtotal: 195000, tax: 19500, total: 214500, paymentMethod: 'qr', paidAt: '2026-07-20T11:40:00.000Z',
-  },
-  {
-    id: 'b10', code: 'HD-0018', orderId: 'o18', customerName: 'Khách lẻ', tableName: 'Bàn 3', tableCode: 't3',
-    items: [{ menuItemId: 'm1', name: 'Phở bò tái', price: 65000, quantity: 1 }],
-    subtotal: 65000, tax: 6500, total: 71500, paymentMethod: 'cash', paidAt: '2026-07-20T11:52:00.000Z',
-  },
+  paidBill(1, 'Bàn 1', 'Khách lẻ', [['m4', 2]], 'CASH', '2026-07-20T09:50:00.000Z'),
+  paidBill(2, 'Bàn 3', 'Anh Minh', [['m1', 3]], 'VIETQR', '2026-07-20T10:05:00.000Z'),
+  paidBill(3, 'VIP 1', 'Chị Lan', [['m2', 4], ['m5', 4]], 'CASH', '2026-07-20T10:22:00.000Z'),
+  paidBill(4, 'Bàn 6', 'Khách lẻ', [['m4', 2], ['m6', 3]], 'CASH', '2026-07-20T10:35:00.000Z'),
+  paidBill(5, 'Bàn 2', 'Anh Tú', [['m3', 2]], 'VIETQR', '2026-07-20T10:48:00.000Z'),
+  paidBill(6, 'Bàn 5', 'Chị Hoa', [['m1', 2], ['m4', 2]], 'VIETQR', '2026-07-20T11:02:00.000Z'),
+  paidBill(7, 'Bàn 4', 'Khách lẻ', [['m5', 6]], 'CASH', '2026-07-20T11:15:00.000Z'),
+  paidBill(8, 'VIP 2', 'Anh Bảo', [['m2', 5], ['m6', 5]], 'CASH', '2026-07-20T11:28:00.000Z'),
+  paidBill(9, 'Bàn 1', 'Chị Mai', [['m3', 3], ['m4', 3]], 'VIETQR', '2026-07-20T11:40:00.000Z'),
+  paidBill(10, 'Bàn 3', 'Khách lẻ', [['m1', 1]], 'CASH', '2026-07-20T11:52:00.000Z'),
+];
+
+/** Mã voucher mock — BE thật: voucherServiceValidateVoucher (P1). */
+export const vouchers: Record<string, { type: 'PERCENT' | 'AMOUNT'; value: number }> = {
+  GIAM10: { type: 'PERCENT', value: 10 },
+  GIAM20: { type: 'PERCENT', value: 20 },
+  GIAM50K: { type: 'AMOUNT', value: 50000 },
+};
+
+/** Khách thân thiết mock — BE thật: membershipServiceLookupByPhone (P1). */
+export const customers: Customer[] = [
+  { id: 'cu1', name: 'Chị Lan', phone: '0901234567', tier: 'GOLD', pointBalance: 1250 },
+  { id: 'cu2', name: 'Anh Minh', phone: '0912345678', tier: 'SILVER', pointBalance: 430 },
 ];
 
 export const notifications: AppNotification[] = [

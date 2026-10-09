@@ -12,7 +12,8 @@ import { useOfflineQueueStore } from '@/store/offline-queue-store';
 
 export function ConnectivityBanner() {
   const online = useIsOnline();
-  const pending = useOfflineQueueStore((s) => s.queue.length);
+  const pending = useOfflineQueueStore((s) => s.queue.filter((q) => !q.error).length);
+  const failed = useOfflineQueueStore((s) => s.queue.filter((q) => q.error).length);
   const qc = useQueryClient();
   const insets = useSafeAreaInsets();
   const wasOnline = useRef(online);
@@ -20,14 +21,15 @@ export function ConnectivityBanner() {
   // Vừa có mạng lại → flush hàng đợi.
   useEffect(() => {
     if (online && !wasOnline.current && pending > 0) {
-      flushOfflineQueue(qc).then((n) => {
-        if (n > 0) toast.success('Đã gửi bếp', `${n} đơn chờ đã được gửi`);
+      flushOfflineQueue(qc).then(({ sent, failed: f }) => {
+        if (sent > 0) toast.success('Đã gửi bếp', `${sent} lượt chờ đã được gửi`);
+        if (f > 0) toast.error('Có món không gửi được', 'Mở đơn để xem và xử lý');
       });
     }
     wasOnline.current = online;
   }, [online, pending, qc]);
 
-  if (online && pending === 0) return null;
+  if (online && pending === 0 && failed === 0) return null;
 
   return (
     <View
@@ -37,7 +39,11 @@ export function ConnectivityBanner() {
     >
       <CloudOff size={14} color="#fff" />
       <Text className="ml-2 text-xs font-bold text-white">
-        {online ? `Đang gửi ${pending} đơn chờ…` : `Mất mạng${pending > 0 ? ` · ${pending} đơn chờ gửi` : ''}`}
+        {!online
+          ? `Mất mạng${pending > 0 ? ` · ${pending} lượt chờ gửi` : ''}`
+          : pending > 0
+            ? `Đang gửi ${pending} lượt chờ…`
+            : `${failed} lượt gửi bếp lỗi — mở đơn để xử lý`}
       </Text>
     </View>
   );

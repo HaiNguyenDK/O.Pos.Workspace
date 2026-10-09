@@ -1,40 +1,84 @@
-// Màn 6 — Bill preview: voucher, loyalty (SĐT), tip, discount, phí phục vụ. Tính qua domain/pricing.
+// Màn 6 — Hoá đơn: chọn voucher, khách thân thiết, tip, giảm giá, phí phục vụ.
+// Mỗi lần đổi điều chỉnh → requestBill; số tiền hiển thị LUÔN là Bill server trả (D7).
 import { Redirect, useRouter } from 'expo-router';
-import { useRef } from 'react';
-import { ScrollView, Switch } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { ActivityIndicator, ScrollView, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft, Split, Ticket, X } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
+import { ApprovalSheet, type ApprovalSheetHandle } from '@/components/sheets/approval-sheet';
 import { VoucherSheet, type VoucherSheetHandle } from '@/components/sheets/voucher-sheet';
 import { LoyaltySheet, type LoyaltySheetHandle } from '@/components/sheets/loyalty-sheet';
-import { calcTotal } from '@/domain/pricing';
-import { TIP_PRESETS } from '@/lib/billing';
+import { useBill, useBranchSettings, useOrder, useRequestBill } from '@/data/queries';
+import { isPosApiError } from '@/data/types';
+import { DISCOUNT_PRESETS, TIP_PRESETS } from '@/lib/billing';
 import { formatMoney } from '@/lib/format';
+import { newId } from '@/lib/id';
+import { taxLabel } from '@/domain/pricing';
 import { color } from '@/lib/theme';
+import { toast } from '@/lib/toast';
 import { useBillStore } from '@/store/bill-store';
 import { useOrderStore } from '@/store/order-store';
 
-const DISCOUNT_PRESETS = [0, 10000, 20000, 50000];
-
-export default function Bill() {
+export default function BillScreen() {
   const router = useRouter();
   const voucherSheet = useRef<VoucherSheetHandle>(null);
   const loyaltySheet = useRef<LoyaltySheetHandle>(null);
+  const approvalSheet = useRef<ApprovalSheetHandle>(null);
 
   const active = useOrderStore((s) => s.active);
-  const items = useOrderStore((s) => s.sentLines);
-  const bill = useBillStore();
+  const order = useOrder(active?.orderId);
+  const settings = useBranchSettings();
+  const adj = useBillStore();
+  const bill = useBill(adj.billId ?? undefined);
+  const requestBill = useRequestBill();
+
+  const version = order.data?.version;
+  const discountValue = adj.manualDiscount?.value ?? 0;
+
+  // Tính lại bill trên server mỗi khi đơn hoặc điều chỉnh đổi.
+  useEffect(() => {
+    if (!active || version === undefined) return;
+    requestBill.mutate(
+      {
+        idempotencyKey: newId(),
+        orderId: active.orderId,
+        expectedVersion: version,
+        voucherCode: adj.voucherCode ?? undefined,
+        customerId: adj.customer?.id,
+        manualDiscount: adj.manualDiscount ?? undefined,
+        serviceCharge: adj.serviceCharge,
+        tip: adj.tip,
+      },
+      {
+        onSuccess: (b) => adj.setBillId(b.id),
+        onError: (e) => {
+          if (!isPosApiError(e)) return toast.error('Mất kết nối', 'Không tính được hoá đơn');
+          if (e.code === 'VERSION_CONFLICT') return void order.refetch();
+          if (e.code === 'APPROVAL_REQUIRED' && adj.manualDiscount) {
+            const d = adj.manualDiscount;
+            return approvalSheet.current?.request(
+              'MANUAL_DISCOUNT',
+              `Giảm ${formatMoney(d.value)} — cần quản lý duyệt`,
+              (a) => adj.setManualDiscount({ ...d, approvalToken: a.approvalToken })
+            );
+          }
+          if (e.code === 'VALIDATION' && adj.voucherCode) {
+            adj.setVoucherCode(null);
+            return toast.error('Voucher không áp dụng được', e.message);
+          }
+          toast.error('Không tính được hoá đơn', e.message);
+        },
+      }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.orderId, version, adj.voucherCode, adj.customer?.id, adj.manualDiscount, adj.serviceCharge, adj.tip]);
 
   if (!active) return <Redirect href="/(app)/home" />;
-  if (items.length === 0) return <Redirect href="/(app)/cart" />;
 
-  const breakdown = calcTotal(items, {
-    voucher: bill.voucher ?? undefined,
-    tip: bill.tip,
-    discount: bill.discount,
-    service: bill.service,
-  });
+  const b = bill.data;
+  const stale = requestBill.isPending || !b;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0B0C' }} edges={['top']}>
@@ -43,84 +87,117 @@ export default function Bill() {
           <ChevronLeft size={22} color={color.text.primary} />
         </Pressable>
         <View className="flex-1">
-          <Text className="text-xl font-extrabold text-fg">Hoá đơn</Text>
+          <Text className="text-xl font-extrabold text-fg">Hoá đơn{b ? ` · ${b.code}` : ''}</Text>
           <Text className="text-xs text-muted">{active.tableName ?? 'Mang về'} · {active.customerName}</Text>
         </View>
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 14, paddingBottom: 24 }}>
         {/* Items */}
-        <View className="rounded-2xl border border-line bg-surface">
-          {items.map((l, i) => (
-            <View key={`${l.menuItemId}|${l.note ?? ''}`} className={`flex-row items-center px-4 py-3 ${i > 0 ? 'border-t border-line' : ''}`}>
-              <Text className="w-8 font-bold text-brand">{l.quantity}×</Text>
-              <View className="flex-1">
-                <Text className="font-semibold text-fg">{l.name}</Text>
-                {!!l.note && <Text className="text-xs text-muted">{l.note}</Text>}
+        {b && (
+          <View className="rounded-2xl border border-line bg-surface">
+            {b.lines.map((l, i) => (
+              <View key={l.lineId} className={`flex-row items-center px-4 py-3 ${i > 0 ? 'border-t border-line' : ''}`}>
+                <Text className="w-8 font-bold text-brand">{l.quantity}×</Text>
+                <View className="flex-1">
+                  <Text className="font-semibold text-fg">{l.name}</Text>
+                  {!!l.note && <Text className="text-xs text-muted">{l.note}</Text>}
+                </View>
+                <Text className="text-muted">{formatMoney(l.lineTotal)}</Text>
               </View>
-              <Text className="text-muted">{formatMoney(l.price * l.quantity)}</Text>
-            </View>
-          ))}
-        </View>
+            ))}
+          </View>
+        )}
 
         {/* Voucher / Loyalty */}
         <View className="flex-row gap-3">
           <ActionTile
             icon={<Ticket size={18} color={color.brand.DEFAULT} />}
-            label={bill.voucher ? bill.voucher.code : 'Voucher'}
-            active={!!bill.voucher}
+            label={adj.voucherCode ?? 'Voucher'}
+            active={!!adj.voucherCode}
             onPress={() => voucherSheet.current?.present()}
-            onClear={bill.voucher ? () => bill.setVoucher(null) : undefined}
+            onClear={adj.voucherCode ? () => adj.setVoucherCode(null) : undefined}
           />
           <ActionTile
             icon={<Text className="text-base">⭐</Text>}
-            label={bill.loyalty ? `${bill.loyalty.points}đ` : 'Tích điểm'}
-            active={!!bill.loyalty}
+            label={adj.customer ? adj.customer.name : 'Tích điểm'}
+            active={!!adj.customer}
             onPress={() => loyaltySheet.current?.present()}
-            onClear={bill.loyalty ? () => bill.setLoyalty(null) : undefined}
+            onClear={adj.customer ? () => adj.setCustomer(null) : undefined}
           />
         </View>
 
         {/* Tip */}
-        <Presets label="Tip" values={TIP_PRESETS} selected={bill.tip} onSelect={bill.setTip} />
-        {/* Discount */}
-        <Presets label="Giảm giá" values={DISCOUNT_PRESETS} selected={bill.discount} onSelect={bill.setDiscount} />
+        <Presets label="Tip" values={TIP_PRESETS} selected={adj.tip} onSelect={adj.setTip} />
+        {/* Giảm giá tay — waiter/thu ngân cần quản lý duyệt (pos-plan Mục 6) */}
+        <Presets
+          label="Giảm giá"
+          values={DISCOUNT_PRESETS}
+          selected={discountValue}
+          onSelect={(v) =>
+            adj.setManualDiscount(v > 0 ? { type: 'AMOUNT', value: v, reason: 'Giảm giá tại bàn' } : null)
+          }
+        />
 
         {/* Service charge */}
-        <View className="flex-row items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3">
-          <View>
-            <Text className="font-semibold text-fg">Phí phục vụ 5%</Text>
-            <Text className="text-xs text-muted">Áp trên tạm tính</Text>
+        {!!settings?.serviceChargeRate && (
+          <View className="flex-row items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3">
+            <View>
+              <Text className="font-semibold text-fg">Phí phục vụ {Math.round(settings.serviceChargeRate * 100)}%</Text>
+              <Text className="text-xs text-muted">Tính sau giảm giá, trước VAT</Text>
+            </View>
+            <Switch
+              value={adj.serviceCharge}
+              onValueChange={adj.toggleServiceCharge}
+              trackColor={{ true: color.brand.DEFAULT, false: color.bg.elevated }}
+              thumbColor="#fff"
+            />
           </View>
-          <Switch
-            value={bill.service}
-            onValueChange={bill.toggleService}
-            trackColor={{ true: color.brand.DEFAULT, false: color.bg.elevated }}
-            thumbColor="#fff"
-          />
-        </View>
+        )}
 
-        {/* Breakdown */}
-        <View className="rounded-2xl border border-line bg-surface px-4 py-3">
-          <Row label="Tạm tính" value={formatMoney(breakdown.subtotal)} />
-          {breakdown.discount > 0 && <Row label="Giảm giá" value={`- ${formatMoney(breakdown.discount)}`} accent />}
-          {breakdown.service > 0 && <Row label="Phí phục vụ" value={formatMoney(breakdown.service)} />}
-          {bill.tip > 0 && <Row label="Tip" value={formatMoney(bill.tip)} />}
-          <Row label="Thuế (VAT 10%)" value={formatMoney(breakdown.tax)} />
-          <View className="mt-2 flex-row justify-between border-t border-line pt-2">
-            <Text className="text-base font-bold text-fg">Tổng cộng</Text>
-            <Text className="text-xl font-extrabold text-brand">{formatMoney(breakdown.total)}</Text>
-          </View>
+        {/* Breakdown — số server trả */}
+        <View className="rounded-2xl border border-line bg-surface px-4 py-3" style={{ opacity: stale ? 0.5 : 1 }}>
+          {!b ? (
+            <ActivityIndicator color={color.brand.DEFAULT} />
+          ) : (
+            <>
+              <Row label="Tạm tính" value={formatMoney(b.subtotal)} />
+              {b.discountTotal > 0 && <Row label="Giảm giá" value={`- ${formatMoney(b.discountTotal)}`} accent />}
+              {b.serviceCharge > 0 && <Row label="Phí phục vụ" value={formatMoney(b.serviceCharge)} />}
+              <Row label={`Thuế (${taxLabel(b.taxRate)})`} value={formatMoney(b.tax)} />
+              {b.tip > 0 && <Row label="Tip" value={formatMoney(b.tip)} />}
+              <View className="mt-2 flex-row justify-between border-t border-line pt-2">
+                <Text className="text-base font-bold text-fg">Tổng cộng</Text>
+                <Text className="text-xl font-extrabold text-brand">{formatMoney(b.total)}</Text>
+              </View>
+            </>
+          )}
         </View>
       </ScrollView>
 
       <View className="flex-row gap-3 border-t border-line px-4 py-4">
-        <Button className="flex-1" variant="ghost" label="Chia hoá đơn" leftIcon={<Split size={18} color={color.text.primary} />} onPress={() => router.push('/(app)/bill/split')} />
-        <Button className="flex-1" label="Thanh toán" onPress={() => router.push('/(app)/payment')} />
+        <Button
+          className="flex-1"
+          variant="ghost"
+          label="Chia hoá đơn"
+          leftIcon={<Split size={18} color={color.text.primary} />}
+          disabled={stale}
+          onPress={() => router.push('/(app)/bill/split')}
+        />
+        <Button
+          className="flex-1"
+          label="Thanh toán"
+          disabled={stale}
+          onPress={() => {
+            adj.setSplitBillIds([]);
+            router.push('/(app)/payment');
+          }}
+        />
       </View>
 
       <VoucherSheet ref={voucherSheet} />
       <LoyaltySheet ref={loyaltySheet} />
+      <ApprovalSheet ref={approvalSheet} />
     </SafeAreaView>
   );
 }

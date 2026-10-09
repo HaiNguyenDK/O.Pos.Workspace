@@ -10,6 +10,7 @@ import { ModifierSheet, type ModifierSheetHandle } from '@/components/sheets/mod
 import { ErrorState } from '@/components/ui/error-state';
 import { useMenu } from '@/data/queries';
 import { color } from '@/lib/theme';
+import { calcSubtotal } from '@/domain/pricing';
 import { formatMoney } from '@/lib/format';
 import { haptics } from '@/lib/haptics';
 import { toast } from '@/lib/toast';
@@ -25,7 +26,7 @@ export default function Menu() {
   const active = useOrderStore((s) => s.active);
   const lines = useCartStore((s) => s.lines);
   const addItem = useCartStore((s) => s.addItem);
-  const totals = useCartStore((s) => s.totals);
+  const cartSubtotal = calcSubtotal(lines);
 
   const [cat, setCat] = useState<string>('all');
   const items = useMemo(() => {
@@ -114,7 +115,7 @@ export default function Menu() {
               <ShoppingCart size={20} color="#fff" />
               <Text className="ml-2 font-bold text-white">{cartCount} món trong giỏ</Text>
             </View>
-            <Text className="font-extrabold text-white">{formatMoney(totals().total)}</Text>
+            <Text className="font-extrabold text-white">{formatMoney(cartSubtotal)}</Text>
           </Pressable>
         </View>
       )}

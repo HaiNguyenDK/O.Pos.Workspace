@@ -19,7 +19,7 @@ export function MenuItemCard({
   onQuickAdd?: () => void;
 }) {
   const g = parseGradient(item.imageGradient);
-  const soldOut = item.available <= 0;
+  const soldOut = !item.isAvailable;
 
   return (
     <Pressable
@@ -50,7 +50,7 @@ export function MenuItemCard({
             <Plus size={18} color="#fff" />
           </Pressable>
         </View>
-        <Text className="mt-1 text-[10px] text-muted">{soldOut ? 'Hết hàng' : `Còn ${item.available}`}</Text>
+        <Text className="mt-1 text-[10px] text-muted">{soldOut ? 'Hết món' : ' '}</Text>
       </View>
     </Pressable>
   );

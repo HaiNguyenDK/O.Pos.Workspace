@@ -14,12 +14,13 @@ import { haptics } from '@/lib/haptics';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import type { Bill, PaymentMethod } from '@/data/types';
+import { methodLabel } from '@/lib/status';
 
 const METHOD: Record<PaymentMethod, { label: string; color: string }> = {
-  cash: { label: 'Tiền mặt', color: color.status.available },
-  qr: { label: 'VietQR', color: color.status.reserved },
-  card: { label: 'Thẻ', color: color.brand.DEFAULT },
-  ewallet: { label: 'Ví', color: color.status.pending },
+  CASH: { label: methodLabel.CASH, color: color.status.available },
+  VIETQR: { label: methodLabel.VIETQR, color: color.status.reserved },
+  CARD: { label: methodLabel.CARD, color: color.brand.DEFAULT },
+  EWALLET: { label: 'Ví', color: color.status.pending },
 };
 
 export default function History() {
@@ -31,7 +32,7 @@ export default function History() {
   const bills = useMemo(
     () =>
       (q.data?.pages.flatMap((p) => p.items) ?? []).sort(
-        (a, b) => +new Date(b.paidAt) - +new Date(a.paidAt)
+        (a, b) => (b.paidAt ?? '').localeCompare(a.paidAt ?? '')
       ),
     [q.data]
   );
@@ -78,7 +79,8 @@ export default function History() {
 }
 
 function BillRow({ bill }: { bill: Bill }) {
-  const m = METHOD[bill.paymentMethod];
+  const paid = bill.payments.filter((p) => p.status === 'SUCCEEDED');
+  const m = METHOD[paid[paid.length - 1]?.method ?? 'CASH'];
   const reprint = async () => {
     haptics.light();
     const res = await printReceipt(bill);
@@ -96,7 +98,7 @@ function BillRow({ bill }: { bill: Bill }) {
           </View>
         </View>
         <Text className="mt-1 text-xs text-muted">
-          {bill.tableName ?? '—'} · {bill.customerName} · {formatDateTime(bill.paidAt)}
+          {bill.tableName ?? '—'} · {bill.customerName} · {formatDateTime(bill.paidAt ?? bill.createdAt)}
         </Text>
         <Text className="mt-1 font-extrabold text-brand">{formatMoney(bill.total)}</Text>
       </View>

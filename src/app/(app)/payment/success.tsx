@@ -1,71 +1,64 @@
-// Màn 11 — thành công: tóm tắt + in/email/sms/e-invoice. In gọi printer stub (D2 — thật ở Sprint 3).
+// Màn 11 — thành công: tóm tắt từ Bill/Payment server trả + in/email/sms/e-invoice (D2 Sunmi).
+// Đã chia bill và còn phần chưa thu → "Thu phần tiếp"; thu đủ → "Hoàn tất".
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect } from 'react';
+import { ActivityIndicator } from 'react-native';
 import { CheckCircle2, Mail, MessageSquare, Printer, ReceiptText } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
-import { calcTotal } from '@/domain/pricing';
+import { useBill, useBills, useMe, usePayment } from '@/data/queries';
 import { printReceipt } from '@/native/printer';
 import { formatMoney } from '@/lib/format';
 import { haptics } from '@/lib/haptics';
+import { methodLabel } from '@/lib/status';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useBillStore } from '@/store/bill-store';
 import { useCartStore } from '@/store/cart-store';
 import { useOrderStore } from '@/store/order-store';
-import type { Bill, PaymentMethod } from '@/data/types';
-
-const METHOD_LABEL: Record<PaymentMethod, string> = { cash: 'Tiền mặt', qr: 'VietQR', card: 'Thẻ', ewallet: 'Ví điện tử' };
 
 export default function PaymentSuccess() {
   const router = useRouter();
-  const active = useOrderStore((s) => s.active);
-  const items = useOrderStore((s) => s.sentLines);
   const clearOrder = useOrderStore((s) => s.clear);
   const clearCart = useCartStore((s) => s.clear);
-  const bill = useBillStore();
+  const billState = useBillStore();
+  const bill = useBill(billState.billId ?? undefined);
+  const payment = usePayment(billState.lastPaymentId ?? undefined);
+  const me = useMe();
+  const parts = useBills(billState.splitBillIds);
 
   useEffect(() => {
     haptics.success();
   }, []);
 
-  if (!active || items.length === 0) return <Redirect href="/(app)/home" />;
+  if (!billState.billId || !billState.lastPaymentId) return <Redirect href="/(app)/home" />;
 
-  const breakdown = calcTotal(items, {
-    voucher: bill.voucher ?? undefined,
-    tip: bill.tip,
-    discount: bill.discount,
-    service: bill.service,
-  });
-  const method = bill.method ?? 'cash';
-  const change = method === 'cash' ? bill.tendered - breakdown.total : 0;
-
-  const receipt: Bill = {
-    id: `b${active.orderId}`,
-    code: `HD-${active.orderId.slice(-4)}`,
-    orderId: active.orderId,
-    customerName: active.customerName,
-    tableName: active.tableName,
-    tableCode: active.tableId,
-    items,
-    subtotal: breakdown.subtotal,
-    tax: breakdown.tax,
-    total: breakdown.total,
-    paymentMethod: method,
-    paidAt: new Date().toISOString(),
-  };
+  const b = bill.data;
+  const p = payment.data;
+  // Phần chưa thu (bill hiện tại vừa thu xong nên loại ra kể cả khi cache chưa kịp làm mới).
+  const remaining = billState.splitBillIds.filter(
+    (id, i) => id !== billState.billId && parts[i]?.data?.status !== 'PAID'
+  );
 
   const finish = () => {
     clearOrder();
     clearCart();
-    bill.reset();
+    billState.reset();
     router.replace('/(app)/home');
   };
 
+  const nextPart = () => {
+    billState.setLastPaymentId(null);
+    billState.setBillId(remaining[0]);
+    router.replace('/(app)/payment');
+  };
+
   const doPrint = async () => {
-    const res = await printReceipt(receipt);
-    if (res.printed) toast.success('Đã in hoá đơn', receipt.code);
+    if (!b) return;
+    const br = me.data?.branch;
+    const res = await printReceipt(b, br ? { name: br.name, address: br.address, phone: br.phone } : undefined);
+    if (res.printed) toast.success('Đã in hoá đơn', b.code);
     else if (res.reason === 'unsupported') toast.info('Không có máy in Sunmi', 'Chạy trên Sunmi V2s để in giấy');
     else if (res.reason === 'not_connected') toast.error('Máy in chưa kết nối', 'Kiểm tra dịch vụ in của Sunmi');
     else toast.error('In lỗi', 'Vui lòng thử lại');
@@ -79,10 +72,22 @@ export default function PaymentSuccess() {
             <CheckCircle2 size={48} color={color.status.available} />
           </View>
           <Text className="mt-4 text-2xl font-extrabold text-fg">Thanh toán thành công</Text>
-          <Text className="mt-1 text-3xl font-extrabold text-brand">{formatMoney(breakdown.total)}</Text>
-          <Text className="mt-1 text-muted">{METHOD_LABEL[method]} · {receipt.code}</Text>
-          {method === 'cash' && change > 0 && (
-            <Text className="mt-1 text-muted">Tiền thối: {formatMoney(change)}</Text>
+          {!p || !b ? (
+            <ActivityIndicator className="mt-3" color={color.brand.DEFAULT} />
+          ) : (
+            <>
+              <Text className="mt-1 text-3xl font-extrabold text-brand">{formatMoney(p.amount)}</Text>
+              <Text className="mt-1 text-muted">
+                {methodLabel[p.method]} · {b.code}
+                {b.part ? ` · phần ${b.part.index + 1}/${b.part.of}` : ''}
+              </Text>
+              {p.method === 'CASH' && (p.change ?? 0) > 0 && (
+                <Text className="mt-1 text-muted">Tiền thối: {formatMoney(p.change ?? 0)}</Text>
+              )}
+              {p.confirmedBy === 'STAFF' && p.method !== 'CASH' && (
+                <Text className="mt-1 text-xs text-muted">Xác nhận thủ công (quản lý duyệt)</Text>
+              )}
+            </>
           )}
         </View>
 
@@ -91,12 +96,16 @@ export default function PaymentSuccess() {
           <ActionBtn icon={<Printer size={22} color={color.text.primary} />} label="In bill" onPress={doPrint} />
           <ActionBtn icon={<Mail size={22} color={color.text.primary} />} label="Email" onPress={() => toast.info('Gửi email', 'Tính năng ở giai đoạn sau')} />
           <ActionBtn icon={<MessageSquare size={22} color={color.text.primary} />} label="SMS" onPress={() => toast.info('Gửi SMS', 'Tính năng ở giai đoạn sau')} />
-          <ActionBtn icon={<ReceiptText size={22} color={color.text.primary} />} label="HĐ điện tử" onPress={() => toast.info('Hoá đơn điện tử', 'TCT — giai đoạn P3')} />
+          <ActionBtn icon={<ReceiptText size={22} color={color.text.primary} />} label="HĐ điện tử" onPress={() => toast.info('Hoá đơn điện tử', 'Chờ chốt pháp lý — pos-plan Mục 8 #3')} />
         </View>
       </View>
 
       <View className="px-4 pb-4">
-        <Button label="Hoàn tất" onPress={finish} />
+        {remaining.length > 0 ? (
+          <Button label="Thu phần tiếp theo" onPress={nextPart} />
+        ) : (
+          <Button label="Hoàn tất" onPress={finish} />
+        )}
       </View>
     </SafeAreaView>
   );

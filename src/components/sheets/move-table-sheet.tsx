@@ -17,7 +17,7 @@ export const MoveTableSheet = forwardRef<
   useImperativeHandle(ref, () => ({ present: () => sheet.current?.present() }));
 
   const targets = (tables.data ?? []).filter(
-    (t) => t.id !== currentTableId && t.status === 'available'
+    (t) => t.id !== currentTableId && t.status === 'AVAILABLE'
   );
 
   const renderBackdrop = useCallback(

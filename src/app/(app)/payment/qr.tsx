@@ -1,77 +1,125 @@
-// Màn 10 — VietQR: hiển thị QR, đếm ngược 300s, poll trạng thái (mock auto-paid).
-// Khi có backend: thay setTimeout bằng poll PosApi (getBill/paymentStatus).
+// Màn 10 — VietQR (D8): startPayment(VIETQR) → server trả qr.payload + expiresAt → poll trạng thái.
+// PAID chỉ khi cổng thanh toán báo về. Xác nhận tay = ngoại lệ, cần PIN quản lý (D12). Rời màn → huỷ payment đang chờ.
+import { useQueryClient } from '@tanstack/react-query';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
-import { usePay } from '@/data/queries';
-import { calcTotal } from '@/domain/pricing';
+import { ApprovalSheet, type ApprovalSheetHandle } from '@/components/sheets/approval-sheet';
+import {
+  invalidateAfterPayment,
+  useBill,
+  useCancelPayment,
+  useConfirmPaymentManually,
+  usePayment,
+  useStartPayment,
+} from '@/data/queries';
+import { isPosApiError } from '@/data/types';
 import { formatMoney } from '@/lib/format';
+import { newId } from '@/lib/id';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useBillStore } from '@/store/bill-store';
-import { useOrderStore } from '@/store/order-store';
-
-const COUNTDOWN = 300; // 5 phút
 
 export default function PaymentQr() {
   const router = useRouter();
-  const active = useOrderStore((s) => s.active);
-  const items = useOrderStore((s) => s.sentLines);
-  const bill = useBillStore();
-  const pay = usePay();
+  const approvalSheet = useRef<ApprovalSheetHandle>(null);
+  const qc = useQueryClient();
+  const billId = useBillStore((s) => s.billId);
+  const setLastPaymentId = useBillStore((s) => s.setLastPaymentId);
+  const bill = useBill(billId ?? undefined);
 
-  const [left, setLeft] = useState(COUNTDOWN);
-  const paidRef = useRef(false);
+  const start = useStartPayment();
+  const cancel = useCancelPayment();
+  const confirmManual = useConfirmPaymentManually();
 
-  const total =
-    active && items.length
-      ? calcTotal(items, {
-          voucher: bill.voucher ?? undefined,
-          tip: bill.tip,
-          discount: bill.discount,
-          service: bill.service,
-        }).total
-      : 0;
+  const [paymentId, setPaymentId] = useState<string | null>(null);
+  const payment = usePayment(paymentId ?? undefined);
+  const p = payment.data;
+  const [now, setNow] = useState(Date.now());
+  const leaving = useRef(false);
 
-  // Đếm ngược
-  useEffect(() => {
-    const id = setInterval(() => setLeft((s) => (s > 0 ? s - 1 : 0)), 1000);
-    return () => clearInterval(id);
-  }, []);
+  const due = bill.data ? bill.data.total - bill.data.paidAmount : 0;
 
-  const onPaid = () => {
-    if (paidRef.current || !active) return;
-    paidRef.current = true;
-    pay.mutate(
-      { billId: `b${active.orderId}`, method: 'qr' },
+  const create = () => {
+    if (!billId || !bill.data) return;
+    start.mutate(
+      { idempotencyKey: newId(), billId, clientRef: newId(), method: 'VIETQR', amount: due },
       {
-        onSuccess: () => router.replace('/(app)/payment/success'),
+        onSuccess: (np) => setPaymentId(np.id),
         onError: (e) => {
-          paidRef.current = false;
-          toast.error('Lỗi thanh toán', (e as Error).message);
+          // Đã có giao dịch chờ (vd quay lại màn) → dùng tiếp giao dịch đó.
+          const pending = bill.data?.payments.find((x) => x.status === 'PENDING' && x.method === 'VIETQR');
+          if (isPosApiError(e) && e.code === 'PAYMENT_PENDING' && pending) return setPaymentId(pending.id);
+          toast.error('Không tạo được mã', (e as Error).message);
         },
       }
     );
   };
 
-  // Poll mock: tự động "nhận tiền" sau 7s (giả lập webhook cổng thanh toán).
+  // Tạo mã khi có bill.
   useEffect(() => {
-    const id = setTimeout(onPaid, 7000);
-    return () => clearTimeout(id);
+    if (bill.data && !paymentId && !start.isPending) create();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bill.data?.id]);
+
+  // Đồng hồ đếm ngược.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
   }, []);
 
-  if (!active || items.length === 0) return <Redirect href="/(app)/cart" />;
+  // Cổng báo có → làm mới bill (poll không qua mutation) rồi sang màn thành công.
+  useEffect(() => {
+    if (p?.status === 'SUCCEEDED') {
+      leaving.current = true;
+      invalidateAfterPayment(qc, p.billId);
+      setLastPaymentId(p.id);
+      router.replace('/(app)/payment/success');
+    }
+  }, [p?.status, p?.id, p?.billId, qc, router, setLastPaymentId]);
 
-  const expired = left <= 0;
+  // Rời màn khi còn chờ → huỷ để có thể đổi phương thức.
+  const latest = useRef(p);
+  latest.current = p;
+  useEffect(
+    () => () => {
+      const cur = latest.current;
+      if (!leaving.current && cur?.status === 'PENDING') cancel.mutate({ idempotencyKey: newId(), paymentId: cur.id });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
+  if (!billId) return <Redirect href="/(app)/payment" />;
+
+  const expiresAt = p?.qr ? Date.parse(p.qr.expiresAt) : 0;
+  const left = Math.max(0, Math.floor((expiresAt - now) / 1000));
+  const expired = !!p && (p.status === 'EXPIRED' || (p.status === 'PENDING' && left === 0));
+  const ended = p && ['FAILED', 'CANCELLED'].includes(p.status);
   const mm = String(Math.floor(left / 60)).padStart(2, '0');
   const ss = String(left % 60).padStart(2, '0');
-  // Payload demo (không phải EMVCo VietQR thật) — đủ để render QR.
-  const payload = `VIETQR|ORDER:${active.orderId}|AMOUNT:${total}|REF:${active.tableName ?? 'TA'}`;
+
+  const regenerate = () => {
+    const old = p;
+    setPaymentId(null);
+    if (old?.status === 'PENDING')
+      cancel.mutate({ idempotencyKey: newId(), paymentId: old.id }, { onSettled: create });
+    else create();
+  };
+
+  const manualConfirm = () =>
+    p &&
+    approvalSheet.current?.request('CONFIRM_PAYMENT', `Xác nhận đã nhận ${formatMoney(p.amount)} — cần quản lý duyệt`, (a) =>
+      confirmManual.mutate(
+        { idempotencyKey: newId(), paymentId: p.id, approvalToken: a.approvalToken, reason: 'Khách đã chuyển, cổng chưa báo về' },
+        { onError: (e) => toast.error('Không xác nhận được', (e as Error).message) }
+      )
+    );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0B0C' }} edges={['top']}>
@@ -84,25 +132,32 @@ export default function PaymentQr() {
 
       <View className="flex-1 items-center justify-center px-6">
         <Text className="mb-1 text-muted">Quét mã để thanh toán</Text>
-        <Text className="mb-6 text-3xl font-extrabold text-brand">{formatMoney(total)}</Text>
+        <Text className="mb-6 text-3xl font-extrabold text-brand">{formatMoney(p?.amount ?? due)}</Text>
 
-        <View className="rounded-3xl bg-white p-5" style={{ opacity: expired ? 0.3 : 1 }}>
-          <QRCode value={payload} size={220} />
+        <View className="rounded-3xl bg-white p-5" style={{ opacity: expired || ended ? 0.3 : 1 }}>
+          {p?.qr ? <QRCode value={p.qr.payload} size={220} /> : <ActivityIndicator style={{ width: 220, height: 220 }} />}
         </View>
 
-        <Text className={`mt-6 text-lg font-bold ${expired ? 'text-cancelled' : 'text-fg'}`}>
-          {expired ? 'Mã đã hết hạn' : `Còn hiệu lực ${mm}:${ss}`}
+        <Text className={`mt-6 text-lg font-bold ${expired || ended ? 'text-cancelled' : 'text-fg'}`}>
+          {!p ? 'Đang tạo mã…' : expired ? 'Mã đã hết hạn' : ended ? 'Giao dịch đã huỷ' : `Còn hiệu lực ${mm}:${ss}`}
         </Text>
-        {pay.isPending && <Text className="mt-2 text-brand">Đang xác nhận thanh toán…</Text>}
+        {p?.status === 'PENDING' && !expired && <Text className="mt-2 text-muted">Đang chờ ngân hàng xác nhận…</Text>}
       </View>
 
       <View className="gap-3 px-4 pb-4">
-        {expired ? (
-          <Button label="Tạo mã mới" onPress={() => { setLeft(COUNTDOWN); paidRef.current = false; }} />
+        {expired || ended ? (
+          <Button label="Tạo mã mới" loading={start.isPending || cancel.isPending} onPress={regenerate} />
         ) : (
-          <Button label="Khách đã chuyển (xác nhận)" onPress={onPaid} loading={pay.isPending} />
+          <Button
+            variant="ghost"
+            label="Khách đã chuyển nhưng chưa báo về (quản lý duyệt)"
+            disabled={p?.status !== 'PENDING'}
+            loading={confirmManual.isPending}
+            onPress={manualConfirm}
+          />
         )}
       </View>
+      <ApprovalSheet ref={approvalSheet} />
     </SafeAreaView>
   );
 }

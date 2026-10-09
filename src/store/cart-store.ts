@@ -1,55 +1,60 @@
-// src/store/cart-store.ts — giỏ hàng cho đơn đang mở (thay PosContext). Mục 5.
+// src/store/cart-store.ts — giỏ: các dòng MỚI chưa gửi bếp cho đơn đang mở.
+// Mỗi dòng có lineId (UUID) sinh ngay khi thêm — dùng làm id dòng phía server (D6).
 import { create } from 'zustand';
-import { calcTotal, type PriceBreakdown } from '@/domain/pricing';
-import type { MenuItem, OrderLine } from '@/data/types';
+import { newId } from '@/lib/id';
+import type { MenuItem, Money, NewLineInput } from '@/data/types';
 
-type CartState = {
-  orderId: string | null;
-  lines: OrderLine[];
-  setOrder: (orderId: string | null) => void;
-  addItem: (item: MenuItem, qty?: number, note?: string) => void;
-  setQty: (menuItemId: string, qty: number) => void;
-  removeItem: (menuItemId: string) => void;
-  clear: () => void;
-  totals: () => PriceBreakdown;
+export type CartLine = {
+  lineId: string;
+  menuItemId: string;
+  name: string;
+  unitPrice: Money;
+  quantity: number;
+  note?: string;
 };
 
-export const useCartStore = create<CartState>((set, get) => ({
-  orderId: null,
-  lines: [],
+export const toNewLine = (l: CartLine): NewLineInput => ({
+  lineId: l.lineId,
+  menuItemId: l.menuItemId,
+  quantity: l.quantity,
+  modifierOptionIds: [],
+  note: l.note,
+});
 
-  setOrder: (orderId) => set({ orderId }),
+type CartState = {
+  lines: CartLine[];
+  addItem: (item: MenuItem, qty?: number, note?: string) => void;
+  setQty: (lineId: string, qty: number) => void;
+  removeLine: (lineId: string) => void;
+  clear: () => void;
+};
+
+export const useCartStore = create<CartState>((set) => ({
+  lines: [],
 
   addItem: (item, qty = 1, note) =>
     set((s) => {
       const existing = s.lines.find((l) => l.menuItemId === item.id && l.note === note);
       if (existing) {
-        return {
-          lines: s.lines.map((l) =>
-            l === existing ? { ...l, quantity: l.quantity + qty } : l
-          ),
-        };
+        return { lines: s.lines.map((l) => (l === existing ? { ...l, quantity: l.quantity + qty } : l)) };
       }
       return {
         lines: [
           ...s.lines,
-          { menuItemId: item.id, name: item.name, price: item.price, quantity: qty, note },
+          { lineId: newId(), menuItemId: item.id, name: item.name, unitPrice: item.price, quantity: qty, note },
         ],
       };
     }),
 
-  setQty: (menuItemId, qty) =>
+  setQty: (lineId, qty) =>
     set((s) => ({
       lines:
         qty <= 0
-          ? s.lines.filter((l) => l.menuItemId !== menuItemId)
-          : s.lines.map((l) => (l.menuItemId === menuItemId ? { ...l, quantity: qty } : l)),
+          ? s.lines.filter((l) => l.lineId !== lineId)
+          : s.lines.map((l) => (l.lineId === lineId ? { ...l, quantity: qty } : l)),
     })),
 
-  removeItem: (menuItemId) =>
-    set((s) => ({ lines: s.lines.filter((l) => l.menuItemId !== menuItemId) })),
+  removeLine: (lineId) => set((s) => ({ lines: s.lines.filter((l) => l.lineId !== lineId) })),
 
-  clear: () => set({ lines: [], orderId: null }),
-
-  totals: () => calcTotal(get().lines),
+  clear: () => set({ lines: [] }),
 }));

@@ -1,21 +1,23 @@
-// src/components/sheets/loyalty-sheet.tsx — tra cứu khách hàng thân thiết theo SĐT (mock).
+// src/components/sheets/loyalty-sheet.tsx — tra cứu khách hàng thân thiết theo SĐT (PosApi.lookupCustomer — P1).
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetTextInput, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
 import { Star } from 'lucide-react-native';
 import { Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
-import { lookupLoyalty } from '@/lib/billing';
+import { useLookupCustomer } from '@/data/queries';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
-import { useBillStore, type LoyaltyCustomer } from '@/store/bill-store';
+import { useBillStore } from '@/store/bill-store';
+import type { Customer } from '@/data/types';
 
 export type LoyaltySheetHandle = { present: () => void };
 
 export const LoyaltySheet = forwardRef<LoyaltySheetHandle>(function LoyaltySheet(_props, ref) {
   const sheet = useRef<BottomSheetModal>(null);
   const [phone, setPhone] = useState('');
-  const [found, setFound] = useState<LoyaltyCustomer | null>(null);
-  const setLoyalty = useBillStore((s) => s.setLoyalty);
+  const [found, setFound] = useState<Customer | null>(null);
+  const setCustomer = useBillStore((s) => s.setCustomer);
+  const lookup = useLookupCustomer();
 
   useImperativeHandle(ref, () => ({
     present: () => {
@@ -26,15 +28,20 @@ export const LoyaltySheet = forwardRef<LoyaltySheetHandle>(function LoyaltySheet
   }));
 
   const search = (p: string) => {
-    const c = lookupLoyalty(p);
-    setFound(c);
-    if (!c) toast.error('Không tìm thấy', 'Cần SĐT ≥ 9 số');
+    if (p.replace(/\D/g, '').length < 9) return toast.error('SĐT chưa đúng', 'Cần ít nhất 9 số');
+    lookup.mutate(p, {
+      onSuccess: (c) => {
+        setFound(c);
+        if (!c) toast.error('Không tìm thấy', p);
+      },
+      onError: (e) => toast.error('Lỗi tra cứu', (e as Error).message),
+    });
   };
 
   const apply = () => {
     if (!found) return;
-    setLoyalty(found);
-    toast.success('Đã gắn khách', `${found.name} · ${found.points} điểm`);
+    setCustomer(found);
+    toast.success('Đã gắn khách', `${found.name} · ${found.pointBalance} điểm`);
     sheet.current?.dismiss();
   };
 
@@ -80,12 +87,14 @@ export const LoyaltySheet = forwardRef<LoyaltySheetHandle>(function LoyaltySheet
             <Star size={20} color={color.brand.DEFAULT} />
             <View className="ml-3 flex-1">
               <Text className="font-bold text-fg">{found.name}</Text>
-              <Text className="text-xs text-muted">{found.phone} · {found.points} điểm</Text>
+              <Text className="text-xs text-muted">
+                {found.phone} · {found.pointBalance} điểm{found.tier ? ` · ${found.tier}` : ''}
+              </Text>
             </View>
           </View>
         )}
         <View className="mt-6 flex-row gap-3">
-          <Button className="flex-1" variant="ghost" label="Tra cứu" onPress={() => search(phone)} />
+          <Button className="flex-1" variant="ghost" label="Tra cứu" loading={lookup.isPending} onPress={() => search(phone)} />
           <Button className="flex-1" label="Gắn khách" onPress={apply} disabled={!found} />
         </View>
       </BottomSheetView>

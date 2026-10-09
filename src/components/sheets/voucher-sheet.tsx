@@ -1,11 +1,9 @@
-// src/components/sheets/voucher-sheet.tsx — nhập & áp mã giảm giá (mock validate).
+// src/components/sheets/voucher-sheet.tsx — nhập mã giảm giá. Server kiểm tra khi tính bill (requestBill).
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetTextInput, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
 import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
-import { validateVoucher } from '@/lib/billing';
 import { color } from '@/lib/theme';
-import { toast } from '@/lib/toast';
 import { useBillStore } from '@/store/bill-store';
 
 export type VoucherSheetHandle = { present: () => void };
@@ -15,7 +13,7 @@ const SUGGESTED = ['GIAM10', 'GIAM20', 'GIAM50K'];
 export const VoucherSheet = forwardRef<VoucherSheetHandle>(function VoucherSheet(_props, ref) {
   const sheet = useRef<BottomSheetModal>(null);
   const [code, setCode] = useState('');
-  const setVoucher = useBillStore((s) => s.setVoucher);
+  const setVoucherCode = useBillStore((s) => s.setVoucherCode);
 
   useImperativeHandle(ref, () => ({
     present: () => {
@@ -24,11 +22,9 @@ export const VoucherSheet = forwardRef<VoucherSheetHandle>(function VoucherSheet
     },
   }));
 
+  // Màn hoá đơn gọi lại requestBill; mã sai → server trả VALIDATION và màn hoá đơn báo lỗi.
   const apply = (c: string) => {
-    const v = validateVoucher(c);
-    if (!v) return toast.error('Mã không hợp lệ', c);
-    setVoucher(v);
-    toast.success('Đã áp voucher', v.type === 'percent' ? `Giảm ${v.value}%` : `Giảm ${v.value.toLocaleString('vi-VN')}đ`);
+    setVoucherCode(c.trim().toUpperCase());
     sheet.current?.dismiss();
   };
 
