@@ -5,6 +5,7 @@ import { apiConfig } from '@/data/api/config';
 import { gql } from '@/data/api/graphql-client';
 import { mockPosApi, registerMenu } from '@/data/api/mock';
 import { apiSession } from '@/data/api/session';
+import { terminalSession } from '@/data/api/terminal';
 import type { PosApi } from '@/data/api/PosApi';
 import * as db from '@/data/mocks';
 import { PosApiError, type Branch, type MenuCategory, type MenuItem, type ModifierGroup } from '@/data/types';
@@ -13,6 +14,7 @@ import { PosApiError, type Branch, type MenuCategory, type MenuItem, type Modifi
 
 type BeCategory = {
   id: string;
+  children?: BeCategory[] | null;
   name: string;
   type?: 'Product' | 'Service' | null;
   isEnabled: boolean;
@@ -39,11 +41,27 @@ export type BeProduct = {
 
 type BeBranch = { id: string; name: string; address: string; status: string };
 
+// Bản public: `categoryServiceAllCategories` cần quyền cấp tổ chức, tài khoản tenant bị 100008.
 const CATEGORIES_QUERY = /* GraphQL */ `
   query PosCategories {
-    categoryServiceAllCategories { id name type isEnabled isDeleted displayOrder }
+    categoryServicePublicCategories {
+      id name type isEnabled isDeleted displayOrder
+      children {
+        id name type isEnabled isDeleted displayOrder
+        children { id name type isEnabled isDeleted displayOrder }
+      }
+    }
   }
 `;
+
+const BRANCHES_QUERY = /* GraphQL */ `
+  query PosBranches($input: EntityServiceListBranchesGqlInput!) {
+    entityServiceListBranches(input: $input) { id name address status }
+  }
+`;
+
+/** Món có danh mục không đọc được / đã ẩn. */
+export const OTHER_CATEGORY: MenuCategory = { id: 'other', name: 'Khác', sortOrder: 9999 };
 
 const PRODUCTS_QUERY = /* GraphQL */ `
   query PosProducts($input: ProductServiceSearchProductGqlInput!, $pagination: PaginationArgs!) {
@@ -102,8 +120,21 @@ export function toMenuItem(p: BeProduct, categoryIds: Set<string>): MenuItem | n
   };
 }
 
-export function toCategories(list: BeCategory[]): MenuCategory[] {
-  return list
+/** Làm phẳng cây danh mục BE. */
+export function flattenCategories(tree: BeCategory[]): BeCategory[] {
+  const flat: BeCategory[] = [];
+  const walk = (nodes?: BeCategory[] | null) => {
+    for (const n of nodes ?? []) {
+      flat.push(n);
+      walk(n.children);
+    }
+  };
+  walk(tree);
+  return flat;
+}
+
+export function toCategories(tree: BeCategory[]): MenuCategory[] {
+  return flattenCategories(tree)
     .filter((c) => c.isEnabled && !c.isDeleted && (c.type ?? 'Product') === 'Product')
     .sort((a, b) => a.displayOrder - b.displayOrder)
     .map((c) => ({ id: c.id, name: c.name, sortOrder: c.displayOrder }));
@@ -127,15 +158,21 @@ export const graphqlPosApi: PosApi = {
 
   async getMenu() {
     const [cats, products] = await Promise.all([
-      gql<{ categoryServiceAllCategories: BeCategory[] }>(CATEGORIES_QUERY),
+      // Không đọc được danh mục thì vẫn bán được: mọi món vào "Khác".
+      gql<{ categoryServicePublicCategories: BeCategory[] }>(CATEGORIES_QUERY).catch(() => null),
       fetchAllProducts(),
     ]);
-    const categories = toCategories(cats.categoryServiceAllCategories);
-    const ids = new Set(categories.map((c) => c.id));
+    const tree = cats?.categoryServicePublicCategories ?? [];
+    const known = toCategories(tree);
+    const ids = new Set(known.map((c) => c.id));
+    // Danh mục có trong cây nhưng bị loại (dịch vụ/tắt/xoá) → bỏ món; id lạ (không có trong cây) → "Khác".
+    const excluded = new Set(flattenCategories(tree).map((c) => c.id).filter((id) => !ids.has(id)));
     const items = products
       .map((p) => toMenuItem(p, ids))
-      .filter((x): x is MenuItem => !!x)
-      .filter((x) => ids.has(x.categoryId));
+      .filter((x): x is MenuItem => !!x && !excluded.has(x.categoryId))
+      .map((x) => (ids.has(x.categoryId) ? x : { ...x, categoryId: OTHER_CATEGORY.id }));
+    const used = new Set(items.map((x) => x.categoryId));
+    const categories = [...known, OTHER_CATEGORY].filter((c) => used.has(c.id));
     registerMenu(items); // đơn/bếp còn chạy mock → mock phải nhận được món thật
     return { categories, items };
   },
@@ -143,7 +180,7 @@ export const graphqlPosApi: PosApi = {
   async me() {
     const session = apiSession.get();
     if (!session) throw new PosApiError('UNAUTHENTICATED', 'Phiên đăng nhập đã hết, vui lòng nhập PIN');
-    const branchId = apiConfig.branchId || session.staff.branchId;
+    const branchId = terminalSession.get()?.branchId || apiConfig.branchId || session.staff.branchId;
     let branch: Branch = { ...db.branch, id: branchId };
     if (branchId && branchId !== db.BRANCH_ID) {
       const data = await gql<{ entityServiceBranchById: BeBranch }>(BRANCH_QUERY, { id: branchId });
@@ -154,3 +191,13 @@ export const graphqlPosApi: PosApi = {
     return { staff: session.staff, branch };
   },
 };
+
+export type BranchOption = { id: string; name: string; address?: string };
+
+/** Chi nhánh đang hoạt động của tenant — cho bước chọn chi nhánh khi kích hoạt máy. */
+export async function listBranches(): Promise<BranchOption[]> {
+  const data = await gql<{ entityServiceListBranches: BeBranch[] }>(BRANCHES_QUERY, {
+    input: { status: 'ACTIVE', limit: 100 },
+  });
+  return data.entityServiceListBranches.map((b) => ({ id: b.id, name: b.name, address: b.address }));
+}

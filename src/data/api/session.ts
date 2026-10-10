@@ -12,3 +12,10 @@ export const apiSession = {
     current = s;
   },
 };
+
+/** Id cố định của máy — BE so với claim deviceIdHash trong token. Gán khi khởi động (lib/device). */
+let deviceId = '';
+export const setDeviceId = (id: string) => {
+  deviceId = id;
+};
+export const getDeviceId = () => deviceId;

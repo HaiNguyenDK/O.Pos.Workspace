@@ -12,6 +12,7 @@ import { getPrinterStatus, isPrinterSupported, testPrint } from '@/native/printe
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/store/auth-store';
+import { needsActivation, useTerminalStore } from '@/store/terminal-store';
 import { useSettingsStore } from '@/store/settings-store';
 
 // Trạng thái máy in → i18n key (printer.status.*).
@@ -32,6 +33,8 @@ export default function Settings() {
   const router = useRouter();
   const s = useSettingsStore();
   const logout = useAuthStore((st) => st.logout);
+  const terminal = useTerminalStore((st) => st.session);
+  const deactivate = useTerminalStore((st) => st.deactivate);
 
   const [status, setStatus] = useState('unknown');
   const [printing, setPrinting] = useState(false);
@@ -101,6 +104,23 @@ export default function Settings() {
         </Section>
 
         {/* Ngôn ngữ */}
+        {needsActivation && terminal ? (
+          <Section title={t('terminal.section')}>
+            <Text className="text-muted">
+              {t('terminal.activatedBy')}: <Text className="text-fg">{terminal.email}</Text>
+            </Text>
+            <Text className="text-muted">
+              {t('terminal.branch')}: <Text className="text-fg">{terminal.branchName ?? '—'}</Text>
+            </Text>
+            <Button
+              variant="ghost"
+              className="mt-2"
+              label={t('terminal.deactivate')}
+              onPress={() => logout().then(deactivate).then(() => router.replace('/(auth)/activate'))}
+            />
+          </Section>
+        ) : null}
+
         <Section title={t('settings.language')}>
           <View className="flex-row rounded-2xl bg-elevated p-1">
             {(['vi', 'en'] as const).map((lng) => (

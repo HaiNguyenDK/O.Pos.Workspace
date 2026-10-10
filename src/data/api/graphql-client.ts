@@ -2,8 +2,9 @@
 // Gắn header theo BE (pkg/middleware): Authorization, X-Tenant-ID, X-Device-Id.
 // Lỗi nghiệp vụ → PosApiError (mã contract); lỗi mạng/timeout → Error thường (offline queue thử lại được).
 import { apiConfig } from '@/data/api/config';
-import { apiSession } from '@/data/api/session';
-import { PosApiError, type PosErrorCode } from '@/data/types';
+import { apiSession, getDeviceId, setDeviceId } from '@/data/api/session';
+import { refreshTerminal, terminalAccessToken, terminalSession } from '@/data/api/terminal';
+import { isPosApiError, PosApiError, type PosErrorCode } from '@/data/types';
 
 /**
  * BE trả extensions.code dạng số (pkg/errx). Bảng này ánh xạ các mã đã biết;
@@ -49,19 +50,15 @@ export function mapErrorCode(code: unknown): PosErrorCode {
 
 type GqlError = { message: string; extensions?: { code?: unknown } };
 
-/** Id cố định của máy — BE so với claim deviceIdHash trong token. Gán khi khởi động (lib/device). */
-let deviceId = '';
-export const setDeviceId = (id: string) => {
-  deviceId = id;
-};
+/** Giữ export cũ: lib/device và script verify gọi setDeviceId từ đây. */
+export { setDeviceId };
 
-export async function gql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
-  if (!apiConfig.graphqlUrl) throw new PosApiError('VALIDATION', 'Chưa cấu hình EXPO_PUBLIC_GRAPHQL_URL');
-  const session = apiSession.get();
+async function send<T>(query: string, variables: Record<string, unknown> | undefined, token: string | undefined) {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const token = apiConfig.devAccessToken || session?.accessToken;
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (apiConfig.tenantId) headers['X-Tenant-ID'] = apiConfig.tenantId;
+  const tenantId = terminalSession.get()?.tenantId || apiConfig.tenantId;
+  if (tenantId) headers['X-Tenant-ID'] = tenantId;
+  const deviceId = getDeviceId();
   if (deviceId) headers['X-Device-Id'] = deviceId;
 
   const ctrl = new AbortController();
@@ -89,4 +86,20 @@ export async function gql<T>(query: string, variables?: Record<string, unknown>)
   }
   if (!body.data) throw new Error('Phản hồi rỗng từ máy chủ');
   return body.data;
+}
+
+/**
+ * Token: phiên kích hoạt máy (terminal.ts) — tự làm mới khi sắp hết hạn, và thử lại 1 lần nếu BE
+ * báo UNAUTHENTICATED. Máy chưa kích hoạt thì dùng token phiên PIN (chế độ mock).
+ */
+export async function gql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+  if (!apiConfig.graphqlUrl) throw new PosApiError('VALIDATION', 'Chưa cấu hình EXPO_PUBLIC_GRAPHQL_URL');
+  const token = (await terminalAccessToken()) ?? apiSession.get()?.accessToken;
+  try {
+    return await send<T>(query, variables, token);
+  } catch (e) {
+    if (!terminalSession.get() || !isPosApiError(e) || e.code !== 'UNAUTHENTICATED') throw e;
+    const fresh = await refreshTerminal();
+    return send<T>(query, variables, fresh.accessToken);
+  }
 }
