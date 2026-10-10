@@ -155,6 +155,7 @@ async function fetchAllProducts(): Promise<BeProduct[]> {
 
 export const graphqlPosApi: PosApi = {
   // BE chưa có PIN máy dùng chung (3.3) — PIN hiện tại của BE gắn 1 user–1 máy và token không có tenant.
+  // Ca thu ngân + báo cáo X/Z (pos-plan 3.7, D14) BE chưa có API → cũng chạy mock (ca theo X-Device-Id của máy).
   ...mockPosApi,
 
   async getMenu() {

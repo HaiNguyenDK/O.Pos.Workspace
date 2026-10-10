@@ -45,4 +45,16 @@ export const toast = {
   success: (text1: string, text2?: string) => Toast.show({ type: 'success', text1, text2 }),
   error: (text1: string, text2?: string) => Toast.show({ type: 'error', text1, text2 }),
   info: (text1: string, text2?: string) => Toast.show({ type: 'info', text1, text2 }),
+  /** Toast có hành động: chạm vào toast → onPress (vd "Máy chưa mở ca" → mở màn ca). */
+  action: (type: 'success' | 'error' | 'info', text1: string, text2: string | undefined, onPress: () => void) =>
+    Toast.show({
+      type,
+      text1,
+      text2,
+      visibilityTime: 6000,
+      onPress: () => {
+        Toast.hide();
+        onPress();
+      },
+    }),
 };

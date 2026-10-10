@@ -22,6 +22,7 @@ import {
 import { isPosApiError } from '@/data/types';
 import { formatMoney } from '@/lib/format';
 import { newId } from '@/lib/id';
+import { handleShiftRequired } from '@/lib/shift';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useBillStore } from '@/store/bill-store';
@@ -57,6 +58,8 @@ export default function PaymentQr() {
           // Đã có giao dịch chờ (vd quay lại màn) → dùng tiếp giao dịch đó.
           const pending = bill.data?.payments.find((x) => x.status === 'PENDING' && x.method === 'VIETQR');
           if (isPosApiError(e) && e.code === 'PAYMENT_PENDING' && pending) return setPaymentId(pending.id);
+          // D14: máy chưa mở ca → nhắc mở ca (chạm toast → màn Ca làm việc).
+          if (handleShiftRequired(e, t, () => router.replace('/(app)/shift'))) return;
           toast.error(t('payment.qrCreateFailed'), (e as Error).message);
         },
       }

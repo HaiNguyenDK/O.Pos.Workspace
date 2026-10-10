@@ -4,10 +4,10 @@ import { Redirect, useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator } from 'react-native';
-import { Banknote, CheckCircle2, ChevronLeft, ChevronRight, CreditCard, QrCode } from 'lucide-react-native';
+import { Banknote, CheckCircle2, ChevronLeft, ChevronRight, CreditCard, QrCode, Wallet } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Pressable, Text, View } from '@/tw';
-import { useBill } from '@/data/queries';
+import { useBill, useCurrentShift } from '@/data/queries';
 import { formatMoney } from '@/lib/format';
 import { color } from '@/lib/theme';
 import { useBillStore } from '@/store/bill-store';
@@ -21,6 +21,8 @@ export default function Payment() {
   const splitBillIds = useBillStore((s) => s.splitBillIds);
   const setBillId = useBillStore((s) => s.setBillId);
   const bill = useBill(billId ?? undefined);
+  const shift = useCurrentShift();
+  const noShift = shift.data === null; // chỉ chặn khi chắc chắn chưa có ca (lỗi mạng thì để server quyết)
 
   // Vừa chia bill → mặc định chọn phần đầu.
   useEffect(() => {
@@ -67,10 +69,26 @@ export default function Payment() {
         )}
       </View>
 
+      {/* D14: máy chưa mở ca → không thu được tiền (server trả SHIFT_REQUIRED). Nhắc mở ca trước. */}
+      {!paid && b && noShift && (
+        <Pressable
+          onPress={() => router.push('/(app)/shift')}
+          className="mx-4 mb-3 flex-row items-center rounded-2xl border px-4 py-3 active:opacity-80"
+          style={{ borderColor: color.status.pending, backgroundColor: 'rgba(245,158,11,0.10)' }}
+        >
+          <Wallet size={20} color={color.status.pending} />
+          <View className="ml-3 flex-1">
+            <Text className="font-bold text-fg">{t('shift.required')}</Text>
+            <Text className="text-xs text-muted">{t('shift.requiredHint')}</Text>
+          </View>
+          <Text className="font-bold text-pending">{t('shift.openNow')}</Text>
+        </Pressable>
+      )}
+
       {!paid && b && (
         <View className="gap-3 px-4">
-          <Method icon={<Banknote size={24} color={color.brand.DEFAULT} />} label={t('payment.cash')} onPress={() => router.push('/(app)/payment/cash')} />
-          <Method icon={<QrCode size={24} color={color.brand.DEFAULT} />} label={t('payment.qr')} onPress={() => router.push('/(app)/payment/qr')} />
+          <Method icon={<Banknote size={24} color={color.brand.DEFAULT} />} label={t('payment.cash')} disabled={noShift} onPress={() => router.push('/(app)/payment/cash')} />
+          <Method icon={<QrCode size={24} color={color.brand.DEFAULT} />} label={t('payment.qr')} disabled={noShift} onPress={() => router.push('/(app)/payment/qr')} />
           <Method icon={<CreditCard size={24} color={color.text.muted} />} label={t('payment.card')} sub={t('payment.cardUnsupported')} disabled />
         </View>
       )}

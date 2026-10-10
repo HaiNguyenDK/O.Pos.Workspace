@@ -4,7 +4,7 @@
 // ⏳ Tiếng Việt có dấu + ký hiệu ₫ trên Sunmi cần test máy thật (pos-plan Mục 8 #1).
 import { formatMoney, formatDateTime } from '@/lib/format';
 import { taxLabel } from '@/domain/pricing';
-import type { Bill, Payment, PaymentMethod } from '@/data/types';
+import type { Bill, Payment, PaymentMethod, ShiftReport } from '@/data/types';
 
 const WIDTH = 32;
 const line = (ch = '-') => ch.repeat(WIDTH);
@@ -72,5 +72,83 @@ export function formatReceipt(bill: Bill, shop: ShopInfo = { name: 'KOPAG POS' }
   out.push('');
   out.push(center('Cam on quy khach!'));
   out.push(center('Hen gap lai'));
+  return out.join('\n');
+}
+
+/** Mã máy rút gọn để in (6 ký tự cuối của X-Device-Id). */
+export const shortTerminalId = (id: string) => (id ? id.replace(/-/g, '').slice(-6).toUpperCase() : '—');
+
+const signedMoney = (v: number) => (v > 0 ? `+${formatMoney(v)}` : formatMoney(v));
+
+/**
+ * Báo cáo X/Z ca thu ngân (pos-plan Mục 3.7) — 58mm, 32 cột.
+ * `showCash = false` (báo cáo X do người không phải quản lý in) → ẩn khối tiền mặt để giữ đếm mù.
+ * Báo cáo Z luôn in đủ: tiền hệ thống, tiền đếm, chênh lệch.
+ */
+export function formatShiftReport(
+  r: ShiftReport,
+  shop: ShopInfo = { name: 'KOPAG POS' },
+  opts: { showCash?: boolean } = {}
+): string {
+  const sh = r.shift;
+  const isZ = r.kind === 'Z';
+  const showCash = isZ || opts.showCash !== false;
+  const out: string[] = [];
+  out.push(center(shop.name.toUpperCase()));
+  if (shop.address) out.push(center(shop.address));
+  out.push(line('='));
+  out.push(center(`BAO CAO ${r.kind}`));
+  out.push(center(isZ ? '(Chot ca)' : '(Giua ca)'));
+  out.push(line('='));
+  out.push(lr('May', shortTerminalId(sh.terminalId)));
+  out.push(lr('Ca', `#${sh.number}`));
+  out.push(lr('Mo ca', sh.openedBy.name));
+  out.push(lr('', formatDateTime(sh.openedAt)));
+  if (isZ && sh.closedBy) {
+    out.push(lr('Chot ca', sh.closedBy.name));
+    out.push(lr('', formatDateTime(sh.closedAt ?? r.generatedAt)));
+  } else {
+    out.push(lr('Gio in', formatDateTime(r.generatedAt)));
+  }
+
+  out.push(line());
+  out.push('DOANH THU');
+  out.push(lr('So bill', String(r.sales.bills)));
+  out.push(lr('Tam tinh', formatMoney(r.sales.subtotal)));
+  if (r.sales.discount > 0) out.push(lr('Giam gia', `-${formatMoney(r.sales.discount)}`));
+  if (r.sales.serviceCharge > 0) out.push(lr('Phi phuc vu', formatMoney(r.sales.serviceCharge)));
+  out.push(lr('VAT', formatMoney(r.sales.tax)));
+  if (r.sales.tips > 0) out.push(lr('Tip', formatMoney(r.sales.tips)));
+  out.push(lr('TONG THU', formatMoney(r.sales.total)));
+
+  out.push(line());
+  out.push('THANH TOAN');
+  if (r.payments.length === 0) out.push('  (khong co)');
+  for (const p of r.payments) out.push(lr(`${METHOD_LABEL[p.method]} (${p.count})`, formatMoney(p.amount)));
+  if (r.voids.lines > 0) out.push(lr(`Huy mon (${r.voids.lines})`, formatMoney(r.voids.amount)));
+
+  if (showCash) {
+    out.push(line());
+    out.push('TIEN MAT');
+    out.push(lr('Dau ca', formatMoney(r.cash.openingFloat)));
+    out.push(lr('Thu tien mat', formatMoney(r.cash.cashSales)));
+    if (r.cash.cashIn > 0) out.push(lr('Nop vao', formatMoney(r.cash.cashIn)));
+    if (r.cash.cashOut > 0) out.push(lr('Chi ra', `-${formatMoney(r.cash.cashOut)}`));
+    out.push(lr('Tien he thong', formatMoney(r.cash.expected)));
+    if (isZ && r.counted !== undefined && r.variance !== undefined) {
+      out.push(lr('Tien dem duoc', formatMoney(r.counted)));
+      const tag = r.variance === 0 ? 'Khop' : r.variance < 0 ? 'Thieu' : 'Thua';
+      out.push(lr(`Chenh lech (${tag})`, signedMoney(r.variance)));
+      if (sh.closeNote) out.push(`Ghi chu: ${sh.closeNote}`);
+    }
+  }
+
+  out.push(line());
+  if (isZ) {
+    out.push('');
+    out.push(lr('Thu ngan', 'Quan ly'));
+    out.push('');
+    out.push('');
+  }
   return out.join('\n');
 }

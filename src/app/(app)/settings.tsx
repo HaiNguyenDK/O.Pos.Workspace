@@ -4,9 +4,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, ChevronRight, LogOut, Printer, ReceiptText } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, LogOut, Printer, ReceiptText, Wallet } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
+import { useCurrentShift } from '@/data/queries';
 import i18n from '@/lib/i18n';
 import { getPrinterStatus, isPrinterSupported, testPrint } from '@/native/printer';
 import { color } from '@/lib/theme';
@@ -35,6 +36,7 @@ export default function Settings() {
   const logout = useAuthStore((st) => st.logout);
   const terminal = useTerminalStore((st) => st.session);
   const deactivate = useTerminalStore((st) => st.deactivate);
+  const shift = useCurrentShift();
 
   const [status, setStatus] = useState('unknown');
   const [printing, setPrinting] = useState(false);
@@ -74,6 +76,16 @@ export default function Settings() {
         <Pressable onPress={() => router.push('/(app)/history')} className="flex-row items-center rounded-2xl border border-line bg-surface px-4 py-4 active:opacity-80">
           <ReceiptText size={20} color={color.brand.DEFAULT} />
           <Text className="ml-3 flex-1 font-semibold text-fg">{t('settings.billHistory')}</Text>
+          <ChevronRight size={18} color={color.text.muted} />
+        </Pressable>
+
+        {/* Ca làm việc (pos-plan 3.7) */}
+        <Pressable onPress={() => router.push('/(app)/shift')} className="flex-row items-center rounded-2xl border border-line bg-surface px-4 py-4 active:opacity-80">
+          <Wallet size={20} color={color.brand.DEFAULT} />
+          <Text className="ml-3 flex-1 font-semibold text-fg">{t('shift.title')}</Text>
+          <Text className={`mr-2 text-sm ${shift.data ? 'text-available' : 'text-pending'}`}>
+            {shift.isLoading ? '…' : shift.data ? t('shift.statusOpen', { number: shift.data.number }) : t('shift.noShift')}
+          </Text>
           <ChevronRight size={18} color={color.text.muted} />
         </Pressable>
 

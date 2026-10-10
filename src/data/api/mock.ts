@@ -1,8 +1,9 @@
 // src/data/api/mock.ts — mockPosApi: đóng vai server theo contract (pos-plan Mục 3.2–3.4; D1).
 // State in-memory trong phiên chạy. Mô phỏng: idempotency, version, append-only lines,
-// server tính tiền, thanh toán PENDING→SUCCEEDED, duyệt bằng approvalToken (D12).
+// server tính tiền, thanh toán PENDING→SUCCEEDED, duyệt bằng approvalToken (D12),
+// ca thu ngân theo máy + báo cáo X/Z (Mục 3.7, D14).
 import * as db from '@/data/mocks';
-import { apiSession } from '@/data/api/session';
+import { apiSession, getDeviceId } from '@/data/api/session';
 import type { PosApi } from '@/data/api/PosApi';
 import { calcBill, lineTotal, lineUnitPrice, type DiscountRule } from '@/domain/pricing';
 import { resolveModifiers } from '@/domain/modifiers';
@@ -13,13 +14,17 @@ import {
   type Approval,
   type ApprovalAction,
   type Bill,
+  type CashMovement,
   type DiningTable,
   type MenuItem,
   type Discount,
   type Order,
   type OrderLine,
   type Payment,
+  type PaymentMethod,
   type RequestBillInput,
+  type Shift,
+  type ShiftReport,
   type Staff,
 } from '@/data/types';
 
@@ -44,6 +49,13 @@ const approvedDiscounts = new Map<string, { type: Discount['type']; value: numbe
 const idemStore = new Map<string, { payload: string; result: unknown }>();
 let pinFails = 0;
 let pinLockedUntil = 0;
+
+// Ca thu ngân (Mục 3.7)
+const shifts: Shift[] = [];
+const cashMovements: CashMovement[] = [];
+const zReports = new Map<string, ShiftReport>(); // báo cáo Z đã chốt — không tính lại
+const shiftNumbers = new Map<string, number>(); // số ca tăng dần theo máy
+const voidLog: { shiftId: string; amount: number }[] = []; // dòng huỷ trên máy trong lúc có ca mở
 
 /** Catalog món mà "server" mock nhận — mặc định menu mock; adapter GraphQL nạp menu BE thật vào đây. */
 const menuCatalog = new Map<string, MenuItem>(db.menuItems.map((m) => [m.id, m]));
@@ -243,6 +255,87 @@ function refreshExpiry(p: Payment) {
   }
 }
 
+// ── Ca thu ngân (Mục 3.7, D14) ──
+
+/** Máy hiện tại = X-Device-Id. Chạy ngoài app (script verify) chưa gán id → dùng id cố định. */
+const terminalId = () => getDeviceId() || 'local-device';
+
+/** Vai trò được thu tiền → được mở ca, xem X (pos-plan Mục 6). */
+const canTakePayment = (s: Staff) => ['OWNER', 'MANAGER', 'CASHIER', 'WAITER'].includes(s.role);
+/** Chốt ca Z, thu/chi tiền mặt: CASHIER, MANAGER, OWNER (Mục 6). */
+const canManageCash = (s: Staff) => ['OWNER', 'MANAGER', 'CASHIER'].includes(s.role);
+
+const staffRef = (s: Staff) => ({ id: s.id, name: s.name });
+
+function currentShift(): Shift | undefined {
+  const tid = terminalId();
+  return shifts.find((x) => x.terminalId === tid && x.status === 'OPEN');
+}
+
+function findShift(id: string): Shift {
+  const sh = shifts.find((x) => x.id === id);
+  if (!sh) throw new PosApiError('NOT_FOUND', 'Không tìm thấy ca');
+  return sh;
+}
+
+function ensureOpenShift(sh: Shift) {
+  if (sh.status !== 'OPEN') throw new PosApiError('VALIDATION', 'Ca đã chốt');
+  if (sh.terminalId !== terminalId()) throw new PosApiError('FORBIDDEN', 'Ca thuộc máy khác');
+}
+
+const isMoney = (v: unknown, min = 0) => typeof v === 'number' && Number.isInteger(v) && v >= min;
+
+/** Payment hoàn tất bill (thành công sau cùng) — bill tính vào ca của payment đó. */
+function billShiftId(b: Bill): string | undefined {
+  const done = b.payments
+    .map((x) => payments.get(x.id) ?? x)
+    .filter((x) => x.status === 'SUCCEEDED')
+    .sort((x, y) => (x.succeededAt ?? '').localeCompare(y.succeededAt ?? ''));
+  return done[done.length - 1]?.shiftId;
+}
+
+/** Báo cáo X tính tại thời điểm gọi. Doanh thu = các bill được thu trong ca; tiền = payment gắn shiftId. */
+function buildShiftReport(sh: Shift): ShiftReport {
+  const sum = (xs: number[]) => xs.reduce((a, v) => a + v, 0);
+  const paid = bills.filter((b) => b.status === 'PAID' && billShiftId(b) === sh.id);
+  const succeeded = [...payments.values()].filter((p) => p.shiftId === sh.id && p.status === 'SUCCEEDED');
+  const byMethod = new Map<PaymentMethod, { method: PaymentMethod; count: number; amount: number }>();
+  for (const p of succeeded) {
+    const row = byMethod.get(p.method) ?? { method: p.method, count: 0, amount: 0 };
+    row.count += 1;
+    row.amount += p.amount;
+    byMethod.set(p.method, row);
+  }
+  const moves = cashMovements.filter((m) => m.shiftId === sh.id);
+  const cashSales = sum(succeeded.filter((p) => p.method === 'CASH').map((p) => p.amount));
+  const cashIn = sum(moves.filter((m) => m.type === 'IN').map((m) => m.amount));
+  const cashOut = sum(moves.filter((m) => m.type === 'OUT').map((m) => m.amount));
+  const voids = voidLog.filter((v) => v.shiftId === sh.id);
+  return {
+    kind: 'X',
+    shift: clone(sh),
+    generatedAt: now(),
+    sales: {
+      bills: paid.length,
+      subtotal: sum(paid.map((b) => b.subtotal)),
+      discount: sum(paid.map((b) => b.discountTotal)),
+      serviceCharge: sum(paid.map((b) => b.serviceCharge)),
+      tax: sum(paid.map((b) => b.tax)),
+      total: sum(paid.map((b) => b.total)),
+      tips: sum(paid.map((b) => b.tip)),
+    },
+    payments: [...byMethod.values()],
+    voids: { lines: voids.length, amount: sum(voids.map((v) => v.amount)) },
+    cash: {
+      openingFloat: sh.openingFloat,
+      cashSales,
+      cashIn,
+      cashOut,
+      expected: sh.openingFloat + cashSales + cashIn - cashOut,
+    },
+  };
+}
+
 // ── API ──
 
 export const mockPosApi: PosApi = {
@@ -427,6 +520,8 @@ export const mockPosApi: PosApi = {
       reopenIfBilling(o);
       line.status = 'VOIDED';
       line.voided = { reason: input.reason, by: actor.id, approvedBy: approver?.id, at: now() };
+      const sh = currentShift();
+      if (sh) voidLog.push({ shiftId: sh.id, amount: line.lineTotal });
       touch(o);
       return o;
     });
@@ -522,6 +617,9 @@ export const mockPosApi: PosApi = {
   startPayment(input) {
     return idem(input, () => {
       me();
+      // D14: mọi thanh toán trên máy phải nằm trong 1 ca đang mở.
+      const shift = currentShift();
+      if (!shift) throw new PosApiError('SHIFT_REQUIRED', 'Máy chưa mở ca — mở ca trước khi thu tiền');
       const bill = findBill(input.billId);
       if (bill.status !== 'OPEN') throw new PosApiError('ORDER_LOCKED', 'Hoá đơn đã đóng');
       for (const x of bill.payments) {
@@ -542,6 +640,7 @@ export const mockPosApi: PosApi = {
         method: input.method,
         amount: input.amount,
         status: 'PENDING',
+        shiftId: shift.id,
         createdAt: now(),
       };
 
@@ -603,5 +702,118 @@ export const mockPosApi: PosApi = {
       settle(p);
       return p;
     });
+  },
+
+  // ── Ca thu ngân (Mục 3.7) ──
+
+  async getCurrentShift() {
+    await delay(150);
+    me();
+    const sh = currentShift();
+    return sh ? clone(sh) : null;
+  },
+
+  openShift(input) {
+    return idem(input, () => {
+      const actor = me();
+      if (!canTakePayment(actor)) throw new PosApiError('FORBIDDEN', 'Không có quyền mở ca');
+      if (!isMoney(input.openingFloat)) throw new PosApiError('VALIDATION', 'Tiền đầu ca không hợp lệ');
+      const open = currentShift();
+      if (open) throw new PosApiError('SHIFT_ALREADY_OPEN', `Máy đang có ca #${open.number} mở`, { shift: clone(open) });
+      const tid = terminalId();
+      const number = (shiftNumbers.get(tid) ?? 0) + 1;
+      shiftNumbers.set(tid, number);
+      const sh: Shift = {
+        id: `sh${Date.now()}${Math.floor(Math.random() * 1000)}`,
+        branchId: actor.branchId || db.BRANCH_ID,
+        terminalId: tid,
+        number,
+        status: 'OPEN',
+        openedBy: staffRef(actor),
+        openedAt: now(),
+        openingFloat: input.openingFloat,
+      };
+      shifts.push(sh);
+      return sh;
+    });
+  },
+
+  addCashMovement(input) {
+    return idem(input, () => {
+      const actor = me();
+      if (!canManageCash(actor)) throw new PosApiError('FORBIDDEN', 'Chỉ thu ngân / quản lý được thu chi tiền mặt');
+      const sh = findShift(input.shiftId);
+      ensureOpenShift(sh);
+      if (input.type !== 'IN' && input.type !== 'OUT') throw new PosApiError('VALIDATION', 'Loại thu/chi không hợp lệ');
+      if (!isMoney(input.amount, 1)) throw new PosApiError('VALIDATION', 'Số tiền phải lớn hơn 0');
+      if (!input.reason?.trim()) throw new PosApiError('VALIDATION', 'Cần nhập lý do');
+      // D12: chi tiền mặt cần quản lý duyệt nếu người làm không phải MANAGER/OWNER.
+      if (input.type === 'OUT' && !canApprove(actor)) consumeApproval(input.approvalToken, 'CASH_OUT');
+      const m: CashMovement = {
+        id: `cm${Date.now()}${Math.floor(Math.random() * 1000)}`,
+        shiftId: sh.id,
+        type: input.type,
+        amount: input.amount,
+        reason: input.reason.trim(),
+        by: staffRef(actor),
+        createdAt: now(),
+      };
+      cashMovements.push(m);
+      return m;
+    });
+  },
+
+  async getShiftReport({ shiftId }) {
+    await delay(200);
+    me();
+    const sh = findShift(shiftId);
+    if (sh.status === 'CLOSED') return clone(zReports.get(sh.id)!);
+    return buildShiftReport(sh);
+  },
+
+  closeShift(input) {
+    return idem(input, () => {
+      const actor = me();
+      if (!canManageCash(actor)) throw new PosApiError('FORBIDDEN', 'Chỉ thu ngân / quản lý được chốt ca');
+      const sh = findShift(input.shiftId);
+      ensureOpenShift(sh);
+      if (!isMoney(input.countedCash)) throw new PosApiError('VALIDATION', 'Số tiền đếm không hợp lệ');
+      for (const p of payments.values()) if (p.shiftId === sh.id) refreshExpiry(p);
+      if ([...payments.values()].some((p) => p.shiftId === sh.id && p.status === 'PENDING'))
+        throw new PosApiError('PAYMENT_PENDING', 'Còn giao dịch đang chờ trên máy, xử lý trước khi chốt ca');
+      // Đếm mù: expected chỉ tính và trả về SAU khi đã nhận số đếm.
+      const x = buildShiftReport(sh);
+      sh.status = 'CLOSED';
+      sh.closedBy = staffRef(actor);
+      sh.closedAt = now();
+      sh.countedCash = input.countedCash;
+      sh.expectedCash = x.cash.expected;
+      sh.variance = input.countedCash - x.cash.expected;
+      if (input.note?.trim()) sh.closeNote = input.note.trim();
+      const z: ShiftReport = {
+        ...x,
+        kind: 'Z',
+        shift: clone(sh),
+        generatedAt: sh.closedAt,
+        counted: sh.countedCash,
+        variance: sh.variance,
+      };
+      zReports.set(sh.id, clone(z));
+      return z;
+    });
+  },
+
+  async listShifts(query) {
+    await delay();
+    me();
+    const all = shifts
+      .filter((x) => x.branchId === query.branchId)
+      .filter((x) => !query.terminalId || x.terminalId === query.terminalId)
+      .filter((x) => !query.from || x.openedAt >= query.from)
+      .filter((x) => !query.to || x.openedAt <= query.to)
+      .sort((a, b) => b.openedAt.localeCompare(a.openedAt));
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    return { items: clone(all.slice((page - 1) * pageSize, page * pageSize)), page, pageSize, total: all.length };
   },
 };

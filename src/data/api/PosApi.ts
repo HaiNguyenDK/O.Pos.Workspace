@@ -2,12 +2,15 @@
 // UI không bao giờ fetch trực tiếp — chỉ gọi query hook → PosApi. Đổi backend = thay 1 file impl.
 // Tên op phía BE có tiền tố service (vd addLines ↔ restaurantServiceAddLines) — xem docs/pos/pos-be-api-request.md.
 import type {
+  AddCashMovementInput,
   Approval,
   ApprovalAction,
   AppNotification,
   Bill,
   BillQuery,
   Branch,
+  CashMovement,
+  CloseShiftInput,
   Customer,
   DiningTable,
   Idem,
@@ -15,10 +18,14 @@ import type {
   MenuItem,
   NewLineInput,
   OpenOrderInput,
+  OpenShiftInput,
   Order,
   Paginated,
   Payment,
   RequestBillInput,
+  Shift,
+  ShiftQuery,
+  ShiftReport,
   SplitPlan,
   Staff,
   StartPaymentInput,
@@ -63,4 +70,14 @@ export interface PosApi {
   confirmPaymentManually(
     input: Idem & { paymentId: string; approvalToken: string; reason: string }
   ): Promise<Payment>;
+
+  // Ca thu ngân & báo cáo X/Z (Mục 3.7, D14) — ca theo máy (X-Device-Id). startPayment khi chưa mở ca → SHIFT_REQUIRED.
+  getCurrentShift(): Promise<Shift | null>;
+  openShift(input: OpenShiftInput): Promise<Shift>;
+  addCashMovement(input: AddCashMovementInput): Promise<CashMovement>;
+  /** Ca OPEN → báo cáo X (tính lúc gọi). Ca CLOSED → báo cáo Z đã chốt. */
+  getShiftReport(input: { shiftId: string }): Promise<ShiftReport>;
+  /** Đếm mù — trả báo cáo Z (expected + variance do server tính). */
+  closeShift(input: CloseShiftInput): Promise<ShiftReport>;
+  listShifts(query: ShiftQuery): Promise<Paginated<Shift>>;
 }

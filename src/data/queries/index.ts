@@ -11,7 +11,7 @@ import {
 } from '@tanstack/react-query';
 import { api } from '@/data/api';
 import type { PosApi } from '@/data/api/PosApi';
-import type { Bill, Order } from '@/data/types';
+import { isPosApiError, type Bill, type Order } from '@/data/types';
 
 export const qk = {
   me: ['me'] as const,
@@ -24,6 +24,9 @@ export const qk = {
   payment: (paymentId: string) => ['payment', paymentId] as const,
   history: (search?: string) => ['history', search ?? ''] as const,
   notifications: ['notifications'] as const,
+  shift: ['shift'] as const,
+  currentShift: ['shift', 'current'] as const,
+  shiftReport: (shiftId: string) => ['shift', shiftId, 'report'] as const,
 };
 
 /** Polling thay realtime cho tới khi BE có subscription (pos-plan Mục 3.2, câu hỏi #5). */
@@ -153,7 +156,12 @@ function usePaymentMutation<K extends 'startPayment' | 'cancelPayment' | 'confir
         qc.invalidateQueries({ queryKey: qk.tables });
         qc.invalidateQueries({ queryKey: qk.runningOrders });
         qc.invalidateQueries({ queryKey: ['history'] });
+        qc.invalidateQueries({ queryKey: qk.shift });
       }
+    },
+    onError: (e) => {
+      // Ca vừa bị chốt ở nơi khác / chưa mở → làm mới trạng thái ca.
+      if (isPosApiError(e) && e.code === 'SHIFT_REQUIRED') qc.invalidateQueries({ queryKey: qk.shift });
     },
   });
 }
@@ -183,4 +191,56 @@ export function invalidateAfterPayment(qc: QueryClient, billId: string) {
   qc.invalidateQueries({ queryKey: qk.tables });
   qc.invalidateQueries({ queryKey: qk.runningOrders });
   qc.invalidateQueries({ queryKey: ['history'] });
+  qc.invalidateQueries({ queryKey: qk.shift });
+}
+
+// ── Ca thu ngân & báo cáo X/Z (pos-plan Mục 3.7, D14) ──
+
+/** Ca đang mở của máy này; null = chưa mở ca (thu tiền sẽ bị SHIFT_REQUIRED). */
+export function useCurrentShift() {
+  return useQuery({ queryKey: qk.currentShift, queryFn: () => api.getCurrentShift() });
+}
+
+/** Báo cáo X (ca OPEN, poll để số liệu sống) hoặc Z (ca CLOSED, không đổi). */
+export function useShiftReport(shiftId: string | undefined, live = false) {
+  return useQuery({
+    queryKey: qk.shiftReport(shiftId ?? ''),
+    queryFn: () => api.getShiftReport({ shiftId: shiftId! }),
+    enabled: !!shiftId,
+    refetchInterval: live ? LIVE_POLL_MS * 2 : false,
+  });
+}
+
+export function useOpenShift() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: Args<'openShift'>) => api.openShift(v),
+    onSuccess: (shift) => {
+      qc.setQueryData(qk.currentShift, shift);
+      qc.invalidateQueries({ queryKey: qk.shift });
+    },
+    onError: (e) => {
+      if (isPosApiError(e) && e.code === 'SHIFT_ALREADY_OPEN') qc.invalidateQueries({ queryKey: qk.shift });
+    },
+  });
+}
+
+export function useAddCashMovement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: Args<'addCashMovement'>) => api.addCashMovement(v),
+    onSuccess: (m) => qc.invalidateQueries({ queryKey: qk.shiftReport(m.shiftId) }),
+  });
+}
+
+export function useCloseShift() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: Args<'closeShift'>) => api.closeShift(v),
+    onSuccess: (z) => {
+      qc.setQueryData(qk.shiftReport(z.shift.id), z);
+      qc.setQueryData(qk.currentShift, null);
+      qc.invalidateQueries({ queryKey: qk.currentShift });
+    },
+  });
 }

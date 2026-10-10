@@ -137,6 +137,8 @@ export type Payment = {
   providerRef?: string;
   confirmedBy?: 'PROVIDER' | 'STAFF';
   approvedBy?: string;
+  /** Ca đang mở của máy lúc tạo payment (Mục 3.7) — PENDING xác nhận sau vẫn tính vào ca này. */
+  shiftId?: string;
   createdAt: string;
   succeededAt?: string;
 };
@@ -208,10 +210,90 @@ export type StartPaymentInput = Idem & {
   tendered?: Money;
 };
 
-export type ApprovalAction = 'VOID_LINE' | 'MANUAL_DISCOUNT' | 'CONFIRM_PAYMENT';
+export type ApprovalAction = 'VOID_LINE' | 'MANUAL_DISCOUNT' | 'CONFIRM_PAYMENT' | 'CASH_OUT';
 export type Approval = { approvalToken: string; approver: { id: string; name: string }; expiresAt: string };
 
 export type Customer = { id: string; name: string; phone: string; tier?: string; pointBalance: number };
+
+// ── Ca thu ngân & báo cáo X/Z (Mục 3.7, D14). Ca theo MÁY: terminalId = X-Device-Id. ──
+
+export type ShiftStatus = 'OPEN' | 'CLOSED';
+export type StaffRef = { id: string; name: string };
+
+export type Shift = {
+  id: string;
+  branchId: string;
+  terminalId: string; // = X-Device-Id của máy
+  number: number; // số ca tăng dần theo máy (in trên báo cáo Z)
+  status: ShiftStatus;
+  openedBy: StaffRef;
+  openedAt: string;
+  openingFloat: Money; // tiền lẻ đầu ca
+  closedBy?: StaffRef;
+  closedAt?: string;
+  countedCash?: Money; // chỉ có khi CLOSED
+  expectedCash?: Money; // chỉ có khi CLOSED
+  variance?: Money; // countedCash − expectedCash (âm = thiếu)
+  closeNote?: string;
+};
+
+export type CashMovementType = 'IN' | 'OUT';
+
+export type CashMovement = {
+  id: string;
+  shiftId: string;
+  type: CashMovementType; // IN = nộp thêm tiền lẻ; OUT = chi tiền mặt ngoài bán hàng
+  amount: Money; // > 0
+  reason: string; // bắt buộc
+  by: StaffRef;
+  createdAt: string;
+};
+
+export type ShiftReport = {
+  kind: 'X' | 'Z'; // X: xem giữa ca, không đóng ca. Z: báo cáo chốt ca.
+  shift: Shift;
+  generatedAt: string;
+  sales: {
+    bills: number; // số bill đã thu đủ
+    subtotal: Money;
+    discount: Money;
+    serviceCharge: Money;
+    tax: Money;
+    total: Money; // = Σ Bill.total đã thu trong ca
+    tips: Money;
+  };
+  payments: { method: PaymentMethod; count: number; amount: Money }[]; // chỉ SUCCEEDED, gồm cả xác nhận tay
+  voids: { lines: number; amount: Money }; // dòng bị huỷ trong ca (thông tin)
+  cash: {
+    openingFloat: Money;
+    cashSales: Money; // Σ Payment CASH SUCCEEDED (amount, KHÔNG tính tendered)
+    cashIn: Money;
+    cashOut: Money;
+    expected: Money; // openingFloat + cashSales + cashIn − cashOut
+  };
+  // Chỉ báo cáo Z:
+  counted?: Money;
+  variance?: Money;
+};
+
+export type OpenShiftInput = Idem & { openingFloat: Money };
+export type AddCashMovementInput = Idem & {
+  shiftId: string;
+  type: CashMovementType;
+  amount: Money;
+  reason: string;
+  approvalToken?: string; // OUT bởi người không phải MANAGER/OWNER (D12, action CASH_OUT)
+};
+/** Đếm mù: client chỉ gửi số đếm được; server trả expected + variance trong báo cáo Z. */
+export type CloseShiftInput = Idem & { shiftId: string; countedCash: Money; note?: string };
+export type ShiftQuery = {
+  branchId: string;
+  terminalId?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  pageSize?: number;
+};
 
 // ── Đọc ──
 
@@ -243,7 +325,9 @@ export type PosErrorCode =
   | 'ORDER_LOCKED'
   | 'PAYMENT_PENDING'
   | 'IDEMPOTENCY_MISMATCH'
-  | 'PROVIDER_ERROR';
+  | 'PROVIDER_ERROR'
+  | 'SHIFT_REQUIRED'
+  | 'SHIFT_ALREADY_OPEN';
 
 export class PosApiError extends Error {
   constructor(

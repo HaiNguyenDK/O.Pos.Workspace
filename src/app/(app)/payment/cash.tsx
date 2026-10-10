@@ -13,6 +13,7 @@ import { cashSuggestions } from '@/lib/billing';
 import { formatMoney } from '@/lib/format';
 import { haptics } from '@/lib/haptics';
 import { newId } from '@/lib/id';
+import { handleShiftRequired } from '@/lib/shift';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useActionKey } from '@/lib/use-action-key';
@@ -48,6 +49,7 @@ export default function PaymentCash() {
         },
         onError: (e) => {
           action.settle(e);
+          if (handleShiftRequired(e, t, () => router.push('/(app)/shift'))) return;
           toast.error(t('payment.error'), (e as Error).message);
         },
       }
