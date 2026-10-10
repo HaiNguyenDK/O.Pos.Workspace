@@ -1,4 +1,5 @@
-// src/components/ui/menu-item-card.tsx — thẻ món (grid 2 cột). Gradient từ imageGradient, quick add.
+// src/components/ui/menu-item-card.tsx — thẻ món (grid 2 cột). Ảnh món từ BE (imageUrl), không có thì gradient; quick add.
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Plus } from 'lucide-react-native';
 import { useTranslation } from 'react-i18next';
@@ -30,7 +31,18 @@ export function MenuItemCard({
       className={`flex-1 overflow-hidden rounded-2xl border border-line bg-surface active:opacity-80 ${soldOut ? 'opacity-40' : ''}`}
     >
       <LinearGradient colors={g.colors} start={g.start} end={g.end} style={{ height: 84, alignItems: 'center', justifyContent: 'center' }}>
-        <Text className="text-4xl">{item.emoji}</Text>
+        {item.imageUrl ? (
+          <Image
+            source={{ uri: item.imageUrl }}
+            style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+            contentFit="cover"
+            transition={150}
+            cachePolicy="memory-disk"
+            accessibilityIgnoresInvertColors
+          />
+        ) : (
+          <Text className="text-4xl">{item.emoji}</Text>
+        )}
         {!!qtyInCart && qtyInCart > 0 && (
           <View className="absolute right-2 top-2 h-6 min-w-6 items-center justify-center rounded-full bg-cart px-1.5">
             <Text className="text-xs font-bold text-white">{qtyInCart}</Text>

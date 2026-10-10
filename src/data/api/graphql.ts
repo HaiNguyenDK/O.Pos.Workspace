@@ -145,10 +145,11 @@ async function fetchAllProducts(): Promise<BeProduct[]> {
   for (let skip = 0; ; skip += PAGE) {
     const data = await gql<{ productServiceSearchProducts: BeProduct[] }>(PRODUCTS_QUERY, {
       input: { isEnabled: true, type: 'PRODUCT' },
-      pagination: { skip, limit: PAGE, sort: [{ field: 'displayOrder', direction: 'ASC' }] },
+      // BE đang chạy chưa nhận `pagination.sort` (VALIDATION_INVALID_TYPE_VARIABLE) → sắp xếp ở FE.
+      pagination: { skip, limit: PAGE },
     });
     out.push(...data.productServiceSearchProducts);
-    if (data.productServiceSearchProducts.length < PAGE) return out;
+    if (data.productServiceSearchProducts.length < PAGE) return out.sort((a, b) => a.displayOrder - b.displayOrder);
   }
 }
 
