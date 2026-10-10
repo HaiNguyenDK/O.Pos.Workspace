@@ -75,6 +75,11 @@ export default function Activate() {
     }
   };
 
+  // Phiên máy nạp muộn (keystore chậm) mà đã có chi nhánh → máy đã kích hoạt, quay về luồng thường.
+  useEffect(() => {
+    if (session?.branchId) router.replace('/');
+  }, [session?.branchId, router]);
+
   useEffect(() => {
     if (step !== 'branch') return;
     let cancelled = false;

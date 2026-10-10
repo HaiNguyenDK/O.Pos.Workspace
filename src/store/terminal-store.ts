@@ -23,16 +23,20 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   async hydrate() {
     if (!needsActivation) return;
+    // Keystore trên Sunmi có lúc trả rất chậm. Không bỏ phiên khi chậm: chờ tối đa 8s rồi cho UI đi tiếp,
+    // phiên đọc xong muộn vẫn được nạp lại (màn kích hoạt tự quay về khi thấy máy đã kích hoạt).
+    const fallback = setTimeout(() => {
+      if (!get().hydrated) set({ hydrated: true });
+    }, 8000);
     try {
       // X-Device-Id phải có trước mọi request REST/GraphQL (token gắn với máy).
       await loadDeviceId();
-      const session = await Promise.race([
-        terminalSession.load(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
-      ]);
+      const session = await terminalSession.load();
       set({ session, hydrated: true });
     } catch {
-      set({ session: null, hydrated: true });
+      set({ hydrated: true });
+    } finally {
+      clearTimeout(fallback);
     }
   },
 
