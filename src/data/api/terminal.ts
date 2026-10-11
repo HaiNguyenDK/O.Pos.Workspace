@@ -2,7 +2,7 @@
 // BE chưa có /auth/pos/terminal/* (pos-be-api-request 3.3) nên tạm dùng đăng nhập portal của quản lý:
 // login → chọn tenant → token theo tenant gắn với X-Device-Id của máy. Token dùng cho mọi request GraphQL;
 // PIN nhân viên vẫn chạy mock cho tới khi BE có PIN máy dùng chung.
-import { apiConfig } from '@/data/api/config';
+import { rest } from '@/data/api/rest-client';
 import { getDeviceId } from '@/data/api/session';
 import { PosApiError } from '@/data/types';
 
@@ -16,6 +16,11 @@ export type TerminalSession = {
   email: string;
   branchId?: string;
   branchName?: string;
+  /**
+   * Bí mật máy do BE cấp khi đăng ký máy (POST /auth/pos/terminal/register, 3.3) — cần cho PIN máy dùng chung
+   * (/auth/pos/pin/login). Chưa có cho tới khi BE làm luồng đăng ký máy.
+   */
+  deviceSecret?: string;
 };
 
 type TokenResponse = { accessToken: string; refreshToken: string; expiresIn: number };
@@ -52,37 +57,6 @@ export const terminalSession = {
 };
 
 const expiresAt = (expiresIn: number) => new Date(Date.now() + expiresIn * 1000).toISOString();
-
-async function rest<T>(path: string, init: { method?: string; token?: string; body?: unknown } = {}): Promise<T> {
-  if (!apiConfig.restUrl) throw new PosApiError('VALIDATION', 'Chưa cấu hình EXPO_PUBLIC_REST_URL');
-  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Device-Id': getDeviceId() };
-  if (init.token) headers.Authorization = `Bearer ${init.token}`;
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), apiConfig.timeoutMs);
-  let res: Response;
-  try {
-    res = await fetch(`${apiConfig.restUrl}${path}`, {
-      method: init.method ?? 'GET',
-      headers,
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
-      signal: ctrl.signal,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-  if (!res.ok) {
-    let message = `Máy chủ trả lỗi ${res.status}`;
-    try {
-      const b = (await res.json()) as { message?: string; error?: string };
-      message = b.message || b.error || message;
-    } catch {
-      // body không phải JSON
-    }
-    if (res.status >= 500) throw new Error(message); // lỗi tạm thời
-    throw new PosApiError(res.status === 401 ? 'UNAUTHENTICATED' : res.status === 403 ? 'FORBIDDEN' : 'VALIDATION', message);
-  }
-  return (await res.json()) as T;
-}
 
 /** Bước 1: email + mật khẩu portal → token chọn tenant + danh sách tenant được phép. */
 export async function terminalLogin(email: string, password: string) {

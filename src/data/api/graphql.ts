@@ -1,7 +1,15 @@
 // src/data/api/graphql.ts — PosApi trên BE passiontech (GraphQL federation).
-// Chỉ các thao tác BE ĐÃ CÓ gọi thật; phần BE chưa có (đơn, bếp, bill, thanh toán, PIN máy dùng chung)
-// tạm dùng mock — xem docs/pos/pos-be-api-request.md. Khi BE làm xong, thay từng hàm, không sửa màn hình.
-import { apiConfig } from '@/data/api/config';
+// Menu + chi nhánh luôn gọi BE thật. Các nhóm BE mới ĐỀ XUẤT (đơn, bill, thanh toán, duyệt, PIN, ca, thông báo)
+// có adapter sẵn ở data/api/be/* — chỉ gọi thật khi nhóm được bật trong EXPO_PUBLIC_BE_FEATURES, còn lại chạy mock.
+// Xem docs/pos/pos-be-api-request.md. BE làm xong nhóm nào → bật cờ, không sửa màn hình.
+import { beApprovalsApi } from '@/data/api/be/approvals';
+import { beBillsApi } from '@/data/api/be/bills';
+import { beNotificationsApi } from '@/data/api/be/notifications';
+import { beOrdersApi } from '@/data/api/be/orders';
+import { bePaymentsApi } from '@/data/api/be/payments';
+import { bePinApi } from '@/data/api/be/pin';
+import { beShiftsApi } from '@/data/api/be/shifts';
+import { apiConfig, type BeFeature } from '@/data/api/config';
 import { gql } from '@/data/api/graphql-client';
 import { mockPosApi, registerMenu } from '@/data/api/mock';
 import { apiSession } from '@/data/api/session';
@@ -153,10 +161,45 @@ async function fetchAllProducts(): Promise<BeProduct[]> {
   }
 }
 
+/**
+ * Bọc 1 thao tác: lúc GỌI mới xét cờ → nhóm bật thì gọi BE thật, tắt thì gọi mock.
+ * (Xét lúc gọi để script verify đổi cờ khi chạy; app đọc cờ từ env 1 lần lúc khởi động.)
+ */
+function gate<K extends keyof PosApi>(feature: BeFeature, key: K, real: PosApi[K]): PosApi[K] {
+  const call = (...args: unknown[]) => {
+    const impl = (apiConfig.beFeatures.has(feature) ? real : mockPosApi[key]) as (...a: unknown[]) => unknown;
+    return impl(...args);
+  };
+  return call as PosApi[K];
+}
+
+function gateAll<K extends keyof PosApi>(feature: BeFeature, real: Pick<PosApi, K>): Pick<PosApi, K> {
+  const out = {} as Pick<PosApi, K>;
+  for (const key of Object.keys(real) as K[]) out[key] = gate(feature, key, real[key]);
+  return out;
+}
+
+/** Nhóm cờ → các thao tác PosApi (đối chiếu pos-be-api-request Mục 3). */
+export const BE_FEATURE_OPS: Record<BeFeature, (keyof PosApi)[]> = {
+  orders: Object.keys(beOrdersApi) as (keyof PosApi)[],
+  bills: Object.keys(beBillsApi) as (keyof PosApi)[],
+  payments: Object.keys(bePaymentsApi) as (keyof PosApi)[],
+  approvals: Object.keys(beApprovalsApi) as (keyof PosApi)[],
+  pin: Object.keys(bePinApi) as (keyof PosApi)[],
+  shifts: Object.keys(beShiftsApi) as (keyof PosApi)[],
+  notifications: Object.keys(beNotificationsApi) as (keyof PosApi)[],
+};
+
 export const graphqlPosApi: PosApi = {
-  // BE chưa có PIN máy dùng chung (3.3) — PIN hiện tại của BE gắn 1 user–1 máy và token không có tenant.
-  // Ca thu ngân + báo cáo X/Z (pos-plan 3.7, D14) BE chưa có API → cũng chạy mock (ca theo X-Device-Id của máy).
+  // Mặc định mock; lookupCustomer (P1, membershipServiceLookupByPhone) chưa có nhóm cờ.
   ...mockPosApi,
+  ...gateAll('orders', beOrdersApi),
+  ...gateAll('bills', beBillsApi),
+  ...gateAll('payments', bePaymentsApi),
+  ...gateAll('approvals', beApprovalsApi),
+  ...gateAll('pin', bePinApi),
+  ...gateAll('shifts', beShiftsApi),
+  ...gateAll('notifications', beNotificationsApi),
 
   async getMenu() {
     const [cats, products] = await Promise.all([
