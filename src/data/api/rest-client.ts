@@ -1,10 +1,14 @@
-// src/data/api/rest-client.ts — gọi REST auth của gateway (/api/v1/auth/*).
-// Dùng cho kích hoạt máy (terminal.ts) và PIN máy dùng chung /auth/pos/* (be/pin.ts).
+// src/data/api/rest-client.ts — gọi REST auth của gateway (base = EXPO_PUBLIC_REST_URL, kết thúc bằng /api/v1).
+// Dùng cho kích hoạt máy (terminal.ts: /auth/portal/*, /pos/auth/terminal/activate) và auth POS
+// (be/pin.ts: /pos/auth/pin-login, be/approvals.ts: /pos/auth/approve).
 // Lỗi nghiệp vụ → PosApiError (mã contract); lỗi mạng/5xx/timeout → Error thường (thử lại được).
 import { apiConfig } from '@/data/api/config';
-import { lookupErrorCode } from '@/data/api/errors';
+import { errorExtras, lookupErrorCode } from '@/data/api/errors';
 import { getDeviceId } from '@/data/api/session';
 import { PosApiError, type PosErrorCode } from '@/data/types';
+
+/** Auth POS của BE: apps/passiontech-auth/internal/routers/routers.go — `/api/v1/pos/auth/*`. */
+export const POS_AUTH_BASE = '/pos/auth';
 
 function byStatus(status: number): PosErrorCode {
   if (status === 401) return 'UNAUTHENTICATED';
@@ -13,15 +17,21 @@ function byStatus(status: number): PosErrorCode {
   return 'VALIDATION';
 }
 
-export async function rest<T>(path: string, init: { method?: string; token?: string; body?: unknown } = {}): Promise<T> {
+export type RestInit = { method?: string; token?: string; body?: unknown; headers?: Record<string, string> };
+
+export async function rest<T>(path: string, init: RestInit = {}): Promise<T> {
   if (!apiConfig.restUrl) throw new PosApiError('VALIDATION', 'Chưa cấu hình EXPO_PUBLIC_REST_URL');
-  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Device-Id': getDeviceId() };
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Device-Id': getDeviceId(),
+    ...init.headers,
+  };
   if (init.token) headers.Authorization = `Bearer ${init.token}`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), apiConfig.timeoutMs);
   let res: Response;
   try {
-    res = await fetch(`${apiConfig.restUrl}${path}`, {
+    res = await fetch(`${apiConfig.restUrl.replace(/\/+$/, '')}${path}`, {
       method: init.method ?? 'GET',
       headers,
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
@@ -41,8 +51,12 @@ export async function rest<T>(path: string, init: { method?: string; token?: str
       // body không phải JSON
     }
     if (res.status >= 500) throw new Error(message); // lỗi tạm thời
-    // BE auth trả { code: 40101 | 42301 | ..., message } — mã nhận ra được thì ưu tiên, không thì theo HTTP status.
-    throw new PosApiError(lookupErrorCode(code) ?? byStatus(res.status), message, code === undefined ? undefined : { beCode: code });
+    // BE auth POS trả { code: 40101 | 42301 | 40301, message } — mã nhận ra được thì ưu tiên, không thì theo HTTP status.
+    throw new PosApiError(
+      lookupErrorCode(code) ?? byStatus(res.status),
+      message,
+      code === undefined ? undefined : { ...errorExtras(code), beCode: code }
+    );
   }
   return (await res.json()) as T;
 }
@@ -52,3 +66,6 @@ export function unwrap<T>(body: T | { data: T }): T {
   if (body && typeof body === 'object' && 'data' in body && body.data && typeof body.data === 'object') return body.data;
   return body as T;
 }
+
+/** Header tenant cho auth POS (BE đọc `X-Tenant-Id`, không cần token). */
+export const tenantHeader = (tenantId: string): Record<string, string> => ({ 'X-Tenant-Id': tenantId });

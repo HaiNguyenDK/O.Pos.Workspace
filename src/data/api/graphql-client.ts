@@ -4,7 +4,7 @@
 import { apiConfig } from '@/data/api/config';
 import { apiSession, getDeviceId, setDeviceId } from '@/data/api/session';
 import { refreshTerminal, terminalAccessToken, terminalSession } from '@/data/api/terminal';
-import { mapErrorCode } from '@/data/api/errors';
+import { errorExtras, mapErrorCode } from '@/data/api/errors';
 import { isPosApiError, PosApiError } from '@/data/types';
 
 /** Bảng mã lỗi BE → contract: data/api/errors.ts (giữ export cũ cho nơi đang import từ đây). */
@@ -44,9 +44,9 @@ async function send<T>(query: string, variables: Record<string, unknown> | undef
   const body = (await res.json()) as { data?: T; errors?: GqlError[] };
   if (body.errors?.length) {
     const e = body.errors[0];
-    // Giữ extensions (vd currentOrderId của TABLE_OCCUPIED, order mới nhất của VERSION_CONFLICT).
+    // Giữ extensions (vd currentOrderId của TABLE_OCCUPIED, latestVersion của VERSION_CONFLICT).
     const { code, ...ext } = e.extensions ?? {};
-    throw new PosApiError(mapErrorCode(code), e.message, { ...ext, beCode: code });
+    throw new PosApiError(mapErrorCode(code), e.message, { ...errorExtras(code), ...ext, beCode: code });
   }
   if (!body.data) throw new Error('Phản hồi rỗng từ máy chủ');
   return body.data;
@@ -55,8 +55,8 @@ async function send<T>(query: string, variables: Record<string, unknown> | undef
 /**
  * Token: phiên kích hoạt máy (terminal.ts) — tự làm mới khi sắp hết hạn, và thử lại 1 lần nếu BE
  * báo UNAUTHENTICATED. Máy chưa kích hoạt thì dùng token phiên PIN (chế độ mock).
- * Cờ `pin` bật (BE có /auth/pos/pin/login, 3.3): token PIN nhân viên mang tenant/branch/role → ưu tiên
- * token đó; hết hạn thì app đưa về màn PIN (không tự làm mới).
+ * Cờ `pin` bật (POST /api/v1/pos/auth/pin-login): staffJwt mang tenant/branch/role → ưu tiên token đó;
+ * BE không cấp refresh token → hết hạn thì app đưa về màn PIN (không tự làm mới).
  */
 export async function gql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
   if (!apiConfig.graphqlUrl) throw new PosApiError('VALIDATION', 'Chưa cấu hình EXPO_PUBLIC_GRAPHQL_URL');

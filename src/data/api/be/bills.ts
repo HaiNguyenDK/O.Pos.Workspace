@@ -1,23 +1,21 @@
 // src/data/api/be/bills.ts — bill & tính tiền trên BE (passiontech-restaurant). Cờ: `bills`.
-// SDL đề xuất: docs/pos/pos-be-api-request.md Mục 3.2 — server tính tiền (D7), FE chỉ hiển thị.
+// Schema thật: apps/passiontech-restaurant/internal/handler/graphql/pos_bill.graphqls @ bb3e223c6 — server tính tiền (D7).
 import { gql } from '@/data/api/graphql-client';
 import type { PosApi } from '@/data/api/PosApi';
-import { currentBranchId, money, opt } from '@/data/api/be/common';
+import { currentBranchId, money, opt, toPaymentMethod, type BeStaffRef } from '@/data/api/be/common';
 import { withConflictOrder } from '@/data/api/be/orders';
-import { PAYMENT_FIELDS, toPayment, type BePayment } from '@/data/api/be/payments';
-import { PosApiError, type Bill, type BillStatus, type Discount, type SplitPlan } from '@/data/types';
+import { toPaymentStatus } from '@/data/api/be/payments';
+import { PosApiError, type Bill, type BillStatus, type Discount, type Payment, type SplitPlan } from '@/data/types';
 
-// ── Kiểu BE (Mục 3.2) ──
+// ── Kiểu BE ──
 
-// ⏳ chờ BE xác nhận tên/field: PosDiscount và BillPart chưa định nghĩa trong SDL — dùng tên field contract.
 type BeDiscount = {
-  kind: 'VOUCHER' | 'MANUAL';
-  code?: string | null;
-  type: 'PERCENT' | 'AMOUNT';
+  type: 'PERCENT' | 'AMOUNT' | 'VOUCHER';
   value: number;
   amount: number;
   reason?: string | null;
-  approvedBy?: string | null;
+  voucherCode?: string | null;
+  approvedBy?: BeStaffRef | null;
 };
 
 type BeBillLine = {
@@ -30,13 +28,17 @@ type BeBillLine = {
   note?: string | null;
 };
 
+/** PosServicePayment — status/vendor là tên proto thô (PAYMENT_STATUS_*, PAYMENT_VENDOR_CODE_*). */
+type BeBillPayment = { paymentId: string; status: string; amount: number; vendor: string };
+
 export type BePosBill = {
   id: string;
   code: string;
   orderId: string;
+  /** 0 = bill chưa chia; 1..n = phần thứ n (1-based) của bill đã chia. */
+  part: number;
   tableName?: string | null;
   customerName?: string | null;
-  part?: { index: number; of: number } | null;
   lines?: BeBillLine[] | null;
   subtotal: number;
   discounts?: BeDiscount[] | null;
@@ -48,73 +50,97 @@ export type BePosBill = {
   total: number;
   paidAmount: number;
   status: BillStatus;
-  payments?: BePayment[] | null;
+  payments?: BeBillPayment[] | null;
   createdAt: string;
   paidAt?: string | null;
 };
 
 export const BILL_FIELDS = `
-  id code orderId tableName customerName
-  part { index of }
+  id code orderId part tableName customerName
   lines { lineId name quantity modifiers unitPrice lineTotal note }
   subtotal discountTotal serviceCharge taxRate tax tip total paidAmount status createdAt paidAt
-  discounts { kind code type value amount reason approvedBy }
-  payments { ${PAYMENT_FIELDS} }
+  discounts { type value amount reason voucherCode approvedBy { id name } }
+  payments { paymentId status amount vendor }
 `;
 
-// ⏳ chờ BE xác nhận tên/field: tên kiểu input.
 export const REQUEST_BILL = /* GraphQL */ `
-  mutation PosRequestBill($input: RestaurantServiceRequestBillGqlInput!) {
+  mutation PosRequestBill($input: RestaurantServiceRequestBillInput!) {
     restaurantServiceRequestBill(input: $input) { ${BILL_FIELDS} }
   }
 `;
 
 export const SPLIT_BILL = /* GraphQL */ `
-  mutation PosSplitBill($input: RestaurantServiceSplitBillGqlInput!) {
+  mutation PosSplitBill($input: RestaurantServiceSplitBillInput!) {
     restaurantServiceSplitBill(input: $input) { ${BILL_FIELDS} }
   }
 `;
 
-// ⏳ chờ BE xác nhận tên/field: SDL 3.2 chưa có query đọc bill — đặt theo restaurantServicePosOrder(id).
 export const BILL_QUERY = /* GraphQL */ `
   query PosBill($id: ID!) {
     restaurantServicePosBill(id: $id) { ${BILL_FIELDS} }
   }
 `;
 
-// ⏳ chờ BE xác nhận tên/field: query lịch sử bill (chỉ PAID, mới nhất trước) — kiểu trang theo
-// restaurantServiceListShifts(page, pageSize) → { items total page pageSize }. Không gửi pagination.sort (Mục 4b).
+/** Bill cùng đơn — để suy ra `part.of` (BE chỉ trả số thứ tự phần). Chỉ cần id/part/status. */
+export const BILLS_BY_ORDER_QUERY = /* GraphQL */ `
+  query PosBillsByOrder($orderId: ID!) {
+    restaurantServiceBillsByOrder(orderId: $orderId) { id part status }
+  }
+`;
+
+/** Lịch sử bill: BE trả mảng (mới tạo trước), không phân trang/tìm kiếm → FE tự lọc + chia trang. */
 export const BILLS_QUERY = /* GraphQL */ `
-  query PosBills($branchId: ID!, $status: BillStatus, $search: String, $page: Int, $pageSize: Int) {
-    restaurantServicePosBills(branchId: $branchId, status: $status, search: $search, page: $page, pageSize: $pageSize) {
-      items { ${BILL_FIELDS} }
-      total page pageSize
-    }
+  query PosBills($branchId: String!, $status: BillStatus, $from: Time, $to: Time) {
+    restaurantServiceBills(branchId: $branchId, status: $status, from: $from, to: $to) { ${BILL_FIELDS} }
   }
 `;
 
 // ── Ánh xạ ──
 
+/**
+ * Discount BE → contract. type VOUCHER (value = số tiền giảm của voucher) → kind VOUCHER, type AMOUNT.
+ * ⚠️ BE bug #8 (be-review-2026-10-11): `amount` luôn = 0 → hoá đơn không hiện tiền giảm từng dòng
+ * (discountTotal vẫn đúng). FE không tự tính lại (D7).
+ */
 export function toDiscount(d: BeDiscount): Discount {
+  const voucher = d.type === 'VOUCHER' || !!d.voucherCode;
   return {
-    kind: d.kind,
-    code: opt(d.code),
-    type: d.type,
+    kind: voucher ? 'VOUCHER' : 'MANUAL',
+    code: opt(d.voucherCode),
+    type: d.type === 'PERCENT' ? 'PERCENT' : 'AMOUNT',
     value: d.value,
     amount: money(d.amount),
     reason: opt(d.reason),
-    approvedBy: opt(d.approvedBy),
+    approvedBy: d.approvedBy?.id || undefined,
   };
 }
 
-export function toBill(b: BePosBill): Bill {
+/** PosServicePayment (tóm tắt trong bill) → Payment contract; thiếu field thì lấy từ bill. */
+export function toBillPayment(p: BeBillPayment, b: Pick<BePosBill, 'id' | 'createdAt' | 'paidAt'>): Payment {
+  const method = toPaymentMethod(p.vendor) ?? 'VIETQR';
+  const status = toPaymentStatus(p.status);
+  return {
+    id: p.paymentId,
+    billId: b.id,
+    clientRef: '',
+    method,
+    amount: money(p.amount),
+    status,
+    confirmedBy: method === 'CASH' ? 'STAFF' : undefined,
+    createdAt: b.createdAt,
+    succeededAt: status === 'SUCCEEDED' ? opt(b.paidAt) : undefined,
+  };
+}
+
+/** `of` = số phần đang hiệu lực của đơn; Bill.part BE 1-based → contract index 0-based. */
+export function toBill(b: BePosBill, partsOf?: number): Bill {
   return {
     id: b.id,
     code: b.code,
     orderId: b.orderId,
     tableName: opt(b.tableName),
     customerName: opt(b.customerName),
-    part: b.part ? { index: b.part.index, of: b.part.of } : undefined,
+    part: b.part > 0 ? { index: b.part - 1, of: Math.max(partsOf ?? b.part, b.part) } : undefined,
     lines: (b.lines ?? []).map((l) => ({
       lineId: l.lineId,
       name: l.name,
@@ -131,28 +157,51 @@ export function toBill(b: BePosBill): Bill {
     taxRate: b.taxRate,
     tax: money(b.tax),
     tip: money(b.tip),
+    // ⚠️ BE bug #7: làm tròn tiền mặt áp vào mọi bill và không trả phần chênh → các dòng có thể không cộng bằng total.
     total: money(b.total),
     paidAmount: money(b.paidAmount),
     status: b.status,
-    payments: (b.payments ?? []).map((p) => toPayment(p, { billId: b.id })),
+    payments: (b.payments ?? []).map((p) => toBillPayment(p, b)),
     createdAt: b.createdAt,
     paidAt: opt(b.paidAt),
   };
 }
 
-/** SplitPlan contract (assignments là map lineId → part) → input BE (mảng { lineId, part }). */
-export function toSplitPlanInput(plan: SplitPlan) {
-  if (plan.mode === 'EVEN') return { mode: 'EVEN', parts: plan.parts };
+/** Số phần của lần chia hiện hành: bill part>0 chưa VOID (bill VOID là lần chia cũ). */
+export function countParts(siblings: { part: number; status: string }[]): number {
+  return siblings.filter((s) => s.part > 0 && s.status !== 'VOID').length;
+}
+
+async function partsOfOrder(orderId: string): Promise<number> {
+  const data = await gql<{ restaurantServiceBillsByOrder: { id: string; part: number; status: string }[] }>(
+    BILLS_BY_ORDER_QUERY,
+    { orderId }
+  );
+  return countParts(data.restaurantServiceBillsByOrder);
+}
+
+/** Bill đã chia → đọc bill cùng đơn để có `part.of`; bill chưa chia → không gọi thêm. */
+async function toBillWithParts(b: BePosBill): Promise<Bill> {
+  return toBill(b, b.part > 0 ? await partsOfOrder(b.orderId) : undefined);
+}
+
+/** SplitPlan contract → input phẳng của BE. Contract partIndex 0-based → BE part 1-based. */
+export function toSplitInput(plan: SplitPlan) {
+  if (plan.mode === 'EVEN') return { mode: 'EVEN' as const, parts: plan.parts };
   return {
-    mode: 'BY_LINE',
+    mode: 'BY_LINE' as const,
     parts: plan.parts,
-    assignments: Object.entries(plan.assignments).map(([lineId, part]) => ({ lineId, part })),
+    assignments: Object.entries(plan.assignments).map(([lineId, part]) => ({ lineId, part: part + 1 })),
   };
 }
+
+const matches = (b: BePosBill, q: string) =>
+  [b.code, b.tableName, b.customerName].some((s) => (s ?? '').toLowerCase().includes(q));
 
 // ── PosApi ──
 
 export const beBillsApi = {
+  // ⚠️ BE bug #6: không đọc được BranchSettings → BE âm thầm tính VAT 0%.
   async requestBill(input) {
     const data = await withConflictOrder(
       gql<{ restaurantServiceRequestBill: BePosBill }>(REQUEST_BILL, {
@@ -173,11 +222,14 @@ export const beBillsApi = {
           serviceCharge: input.serviceCharge,
           tip: input.tip,
         },
-      })
+      }),
+      [{ id: input.orderId, expectedVersion: input.expectedVersion }]
     );
-    return toBill(data.restaurantServiceRequestBill);
+    return toBillWithParts(data.restaurantServiceRequestBill);
   },
 
+  // ⚠️ BE bug #2: BY_LINE chia đều mọi khoản thay vì theo món của từng phần (sai tiền từng phần).
+  // ⚠️ BE bug #1: trả 1 phần của bill đã chia → cả đơn PAID và bàn được giải phóng.
   async splitBill(input) {
     const data = await withConflictOrder(
       gql<{ restaurantServiceSplitBill: BePosBill[] }>(SPLIT_BILL, {
@@ -185,32 +237,40 @@ export const beBillsApi = {
           idempotencyKey: input.idempotencyKey,
           orderId: input.orderId,
           expectedVersion: input.expectedVersion,
-          plan: toSplitPlanInput(input.plan),
+          ...toSplitInput(input.plan),
         },
-      })
+      }),
+      [{ id: input.orderId, expectedVersion: input.expectedVersion }]
     );
-    return data.restaurantServiceSplitBill.map(toBill);
+    const bills = data.restaurantServiceSplitBill;
+    return bills.map((b) => toBill(b, bills.length));
   },
 
   async getBill(billId) {
     const data = await gql<{ restaurantServicePosBill: BePosBill | null }>(BILL_QUERY, { id: billId });
     if (!data.restaurantServicePosBill) throw new PosApiError('NOT_FOUND', 'Không tìm thấy hoá đơn');
-    return toBill(data.restaurantServicePosBill);
+    return toBillWithParts(data.restaurantServicePosBill);
   },
 
+  /**
+   * restaurantServiceBills(branchId, PAID) trả toàn bộ bill đã thu của chi nhánh (không phân trang) →
+   * FE tìm theo mã/bàn/tên khách, sắp paidAt mới nhất trước, rồi cắt trang.
+   */
   async listBills(query) {
     const page = query?.page ?? 1;
     const pageSize = query?.pageSize ?? 20;
-    const data = await gql<{
-      restaurantServicePosBills: { items: BePosBill[]; total: number; page?: number | null; pageSize?: number | null };
-    }>(BILLS_QUERY, {
+    const q = query?.search?.trim().toLowerCase();
+    const data = await gql<{ restaurantServiceBills: BePosBill[] }>(BILLS_QUERY, {
       branchId: currentBranchId(),
       status: 'PAID',
-      search: query?.search?.trim() || undefined,
-      page,
-      pageSize,
     });
-    const r = data.restaurantServicePosBills;
-    return { items: r.items.map(toBill), page: r.page ?? page, pageSize: r.pageSize ?? pageSize, total: r.total };
+    const all = data.restaurantServiceBills
+      .filter((b) => !q || matches(b, q))
+      .sort((a, b) => (b.paidAt ?? b.createdAt).localeCompare(a.paidAt ?? a.createdAt));
+    const slice = all.slice((page - 1) * pageSize, page * pageSize);
+    // Bill đã chia trong trang → đọc số phần theo đơn (mỗi đơn 1 lần).
+    const orderIds = [...new Set(slice.filter((b) => b.part > 0).map((b) => b.orderId))];
+    const parts = new Map(await Promise.all(orderIds.map(async (id) => [id, await partsOfOrder(id)] as const)));
+    return { items: slice.map((b) => toBill(b, parts.get(b.orderId))), page, pageSize, total: all.length };
   },
 } satisfies Pick<PosApi, 'requestBill' | 'splitBill' | 'getBill' | 'listBills'>;

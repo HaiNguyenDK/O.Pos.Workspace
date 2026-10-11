@@ -4,10 +4,23 @@
 export type ApiMode = 'mock' | 'graphql';
 
 /**
- * Nhóm API BE đã đề xuất (pos-be-api-request Mục 3). Chế độ graphql: nhóm nào bật thì gọi BE thật,
- * nhóm nào tắt thì chạy mock — BE xong nhóm nào chỉ cần thêm tên nhóm vào EXPO_PUBLIC_BE_FEATURES.
+ * Nhóm API BE (shape thật theo BE @ bb3e223c6 — docs/pos/be-review-2026-10-11.md). Chế độ graphql: nhóm nào bật
+ * thì gọi BE thật, nhóm nào tắt thì chạy mock — BE deploy nhóm nào chỉ cần thêm tên nhóm vào EXPO_PUBLIC_BE_FEATURES.
+ * - `menu-v2`: getMenu dùng productServiceMenu (modifierGroups, station, priceVnd) thay vì SearchProducts.
+ * - `branch-settings`: me() đọc Branch.phoneNumber + settings (VAT, phí phục vụ, làm tròn) từ entity.
+ * Hai cờ này chưa lên gateway ogw (review Mục 1) — bật khi BE publish subgraph product/entity.
  */
-export const BE_FEATURES = ['orders', 'bills', 'payments', 'approvals', 'pin', 'shifts', 'notifications'] as const;
+export const BE_FEATURES = [
+  'orders',
+  'bills',
+  'payments',
+  'approvals',
+  'pin',
+  'shifts',
+  'notifications',
+  'menu-v2',
+  'branch-settings',
+] as const;
 export type BeFeature = (typeof BE_FEATURES)[number];
 
 /** "orders, bills" → Set{orders, bills}. Rỗng → không nhóm nào (mọi thứ chạy mock). Tên lạ bị bỏ qua. */
@@ -27,8 +40,8 @@ export const apiConfig = {
   /** Endpoint router, vd https://ogw.passiontech.xyz/graphql */
   graphqlUrl: process.env.EXPO_PUBLIC_GRAPHQL_URL ?? '',
   /**
-   * REST auth của gateway, vd https://ogw.passiontech.xyz/api/v1. Dùng để kích hoạt máy
-   * (quản lý đăng nhập portal 1 lần) cho tới khi BE có /auth/pos/terminal/* (pos-be-api-request 3.3).
+   * REST auth của gateway, vd https://ogw.passiontech.xyz/api/v1. Dùng cho kích hoạt máy bằng đăng nhập portal
+   * (/auth/portal/*) và auth POS của BE (/pos/auth/{terminal/activate, pin-login, approve}).
    */
   restUrl: process.env.EXPO_PUBLIC_REST_URL ?? '',
   /** Dự phòng khi máy chưa kích hoạt — bình thường tenant/chi nhánh lấy từ phiên kích hoạt máy. */

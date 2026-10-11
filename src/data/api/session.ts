@@ -13,6 +13,9 @@ export const apiSession = {
   },
 };
 
+/** Khoá SecureStore của id máy (lib/device đọc lúc khởi động; terminal.ts ghi khi BE cấp deviceId lúc kích hoạt). */
+export const DEVICE_ID_KEY = 'pos.device.id';
+
 /** Id cố định của máy — BE so với claim deviceIdHash trong token. Gán khi khởi động (lib/device). */
 let deviceId = '';
 export const setDeviceId = (id: string) => {

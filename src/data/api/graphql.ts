@@ -1,7 +1,7 @@
 // src/data/api/graphql.ts — PosApi trên BE passiontech (GraphQL federation).
-// Menu + chi nhánh luôn gọi BE thật. Các nhóm BE mới ĐỀ XUẤT (đơn, bill, thanh toán, duyệt, PIN, ca, thông báo)
-// có adapter sẵn ở data/api/be/* — chỉ gọi thật khi nhóm được bật trong EXPO_PUBLIC_BE_FEATURES, còn lại chạy mock.
-// Xem docs/pos/pos-be-api-request.md. BE làm xong nhóm nào → bật cờ, không sửa màn hình.
+// Menu + chi nhánh luôn gọi BE thật. Các nhóm POS (đơn, bill, thanh toán, duyệt, PIN, ca, thông báo) có adapter
+// theo shape thật của BE @ bb3e223c6 ở data/api/be/* — chỉ gọi thật khi nhóm được bật trong EXPO_PUBLIC_BE_FEATURES,
+// còn lại chạy mock. Xem docs/pos/be-review-2026-10-11.md. BE deploy nhóm nào → bật cờ, không sửa màn hình.
 import { beApprovalsApi } from '@/data/api/be/approvals';
 import { beBillsApi } from '@/data/api/be/bills';
 import { beNotificationsApi } from '@/data/api/be/notifications';
@@ -16,7 +16,15 @@ import { apiSession } from '@/data/api/session';
 import { terminalSession } from '@/data/api/terminal';
 import type { PosApi } from '@/data/api/PosApi';
 import * as db from '@/data/mocks';
-import { PosApiError, type Branch, type MenuCategory, type MenuItem, type ModifierGroup } from '@/data/types';
+import { currentBranchId } from '@/data/api/be/common';
+import {
+  PosApiError,
+  type Branch,
+  type MenuCategory,
+  type MenuItem,
+  type ModifierGroup,
+  type Station,
+} from '@/data/types';
 
 // ── Kiểu dữ liệu BE (chỉ các field dùng tới) ──
 
@@ -48,6 +56,38 @@ export type BeProduct = {
 };
 
 type BeBranch = { id: string; name: string; address: string; status: string };
+
+type BeBranchSettings = { taxRate: number; pricesIncludeTax: boolean; serviceChargeRate: number; cashRounding: number };
+type BeBranchV2 = BeBranch & { phoneNumber?: string | null; settings?: BeBranchSettings | null };
+
+/** productServiceMenu (cờ `menu-v2`) — product subgraph @ bb3e223c6. */
+type BeMenuVariant = { name?: string | null; sku: string; priceVnd: number; isEnabled: boolean; isAvailable: boolean };
+type BeModifierGroup = {
+  id: string;
+  name: string;
+  min: number;
+  max: number;
+  options: { id: string; name: string; priceDelta: number }[];
+};
+export type BeMenuProduct = {
+  id: string;
+  title: string;
+  type?: 'PRODUCT' | 'SERVICE' | null;
+  categoryIds: string[];
+  description?: string | null;
+  shortDescription?: string | null;
+  thumbnailUrl?: string | null;
+  mediaUrls?: string[] | null;
+  currency: 'VND' | 'USD';
+  isEnabled: boolean;
+  isDeleted: boolean;
+  displayOrder: number;
+  station?: string | null;
+  /** Đã áp cờ còn/hết theo chi nhánh (productServiceSetAvailability). */
+  isAvailable: boolean;
+  modifierGroups?: BeModifierGroup[] | null;
+  variants?: BeMenuVariant[] | null;
+};
 
 // Bản public: `categoryServiceAllCategories` cần quyền cấp tổ chức, tài khoản tenant bị 100008.
 const CATEGORIES_QUERY = /* GraphQL */ `
@@ -84,6 +124,32 @@ const PRODUCTS_QUERY = /* GraphQL */ `
 const BRANCH_QUERY = /* GraphQL */ `
   query PosBranch($id: String!) {
     entityServiceBranchById(id: $id) { id name address status }
+  }
+`;
+
+// Cờ `branch-settings`: Branch.phoneNumber + settings (entity @ bb3e223c6) — chưa lên gateway ogw.
+export const BRANCH_QUERY_V2 = /* GraphQL */ `
+  query PosBranchV2($id: String!) {
+    entityServiceBranchById(id: $id) {
+      id name address status phoneNumber
+      settings { taxRate pricesIncludeTax serviceChargeRate cashRounding }
+    }
+  }
+`;
+
+// Cờ `menu-v2`: menu POS theo chi nhánh (modifierGroups, station, priceVnd, còn/hết theo chi nhánh).
+// Không gửi updatedSince → luôn lấy đủ (removedIds chỉ có ý nghĩa khi lấy delta).
+export const MENU_V2_QUERY = /* GraphQL */ `
+  query PosMenuV2($branchId: String!) {
+    productServiceMenu(branchId: $branchId) {
+      version
+      items {
+        id title type categoryIds description shortDescription thumbnailUrl mediaUrls currency
+        isEnabled isDeleted displayOrder station isAvailable
+        modifierGroups { id name min max options { id name priceDelta } }
+        variants { name sku priceVnd isEnabled isAvailable }
+      }
+    }
   }
 `;
 
@@ -128,6 +194,45 @@ export function toMenuItem(p: BeProduct, categoryIds: Set<string>): MenuItem | n
   };
 }
 
+const STATIONS: Station[] = ['KITCHEN', 'GRILL', 'COLD', 'BAR', 'DESSERT'];
+export const toStation = (s: string | null | undefined): Station => {
+  const v = (s ?? '').trim().toUpperCase() as Station;
+  return STATIONS.includes(v) ? v : 'KITCHEN';
+};
+
+/**
+ * Món của productServiceMenu (cờ `menu-v2`) → MenuItem. Khác bản cũ:
+ * - modifierGroups/station lấy từ BE; KHÔNG sinh nhóm "Loại" giả từ variant.
+ * - Giá = priceVnd của variant đầu tiên đang bật + còn hàng — đúng variant AddLines của BE tính tiền.
+ *   ⚠️ BE bug #4 (be-review-2026-10-11): AddLines chỉ lấy variant đầu → món nhiều size không bán được size khác
+ *   (chờ BE trả lời câu hỏi 1: size = modifierGroups hay AddLines nhận variantId).
+ *   ⚠️ BE bug #5: AddLines dùng int64(price) (cắt) còn menu trả priceVnd (làm tròn) → có thể lệch 1đ với bill.
+ * - Chỉ món type PRODUCT (type null coi như PRODUCT, giống toCategories) đang bật, chưa xoá, VND.
+ */
+export function toMenuItemV2(p: BeMenuProduct, categoryIds: Set<string>): MenuItem | null {
+  if (p.isDeleted || !p.isEnabled || (p.type ?? 'PRODUCT') !== 'PRODUCT' || p.currency !== 'VND') return null;
+  const enabled = (p.variants ?? []).filter((v) => v.isEnabled);
+  if (enabled.length === 0) return null;
+  const sold = enabled.find((v) => v.isAvailable) ?? enabled[0];
+  return {
+    id: p.id,
+    categoryId: p.categoryIds.find((c) => categoryIds.has(c)) ?? p.categoryIds[0] ?? '',
+    name: p.title,
+    description: p.shortDescription ?? p.description ?? undefined,
+    price: Math.round(sold.priceVnd),
+    isAvailable: p.isAvailable && enabled.some((v) => v.isAvailable),
+    station: toStation(p.station),
+    modifierGroups: (p.modifierGroups ?? []).map((g) => ({
+      id: g.id,
+      name: g.name,
+      min: g.min,
+      max: g.max,
+      options: g.options.map((o) => ({ id: o.id, name: o.name, priceDelta: Math.round(o.priceDelta) })),
+    })),
+    imageUrl: p.thumbnailUrl ?? p.mediaUrls?.[0] ?? undefined,
+  };
+}
+
 /** Làm phẳng cây danh mục BE. */
 export function flattenCategories(tree: BeCategory[]): BeCategory[] {
   const flat: BeCategory[] = [];
@@ -146,6 +251,12 @@ export function toCategories(tree: BeCategory[]): MenuCategory[] {
     .filter((c) => c.isEnabled && !c.isDeleted && (c.type ?? 'Product') === 'Product')
     .sort((a, b) => a.displayOrder - b.displayOrder)
     .map((c) => ({ id: c.id, name: c.name, sortOrder: c.displayOrder }));
+}
+
+/** Cờ `menu-v2`: 1 lần gọi trả cả menu của chi nhánh. */
+async function fetchMenuV2(): Promise<BeMenuProduct[]> {
+  const data = await gql<{ productServiceMenu: { items: BeMenuProduct[] } }>(MENU_V2_QUERY, { branchId: currentBranchId() });
+  return [...data.productServiceMenu.items].sort((a, b) => a.displayOrder - b.displayOrder);
 }
 
 async function fetchAllProducts(): Promise<BeProduct[]> {
@@ -188,6 +299,9 @@ export const BE_FEATURE_OPS: Record<BeFeature, (keyof PosApi)[]> = {
   pin: Object.keys(bePinApi) as (keyof PosApi)[],
   shifts: Object.keys(beShiftsApi) as (keyof PosApi)[],
   notifications: Object.keys(beNotificationsApi) as (keyof PosApi)[],
+  // Hai cờ dưới không thay op bằng mock — chỉ đổi đường gọi BE bên trong getMenu / me.
+  'menu-v2': ['getMenu'],
+  'branch-settings': ['me'],
 };
 
 export const graphqlPosApi: PosApi = {
@@ -202,18 +316,21 @@ export const graphqlPosApi: PosApi = {
   ...gateAll('notifications', beNotificationsApi),
 
   async getMenu() {
+    const v2 = apiConfig.beFeatures.has('menu-v2');
     const [cats, products] = await Promise.all([
       // Không đọc được danh mục thì vẫn bán được: mọi món vào "Khác".
       gql<{ categoryServicePublicCategories: BeCategory[] }>(CATEGORIES_QUERY).catch(() => null),
-      fetchAllProducts(),
+      v2 ? fetchMenuV2() : fetchAllProducts(),
     ]);
+    const mapItem = (p: BeProduct | BeMenuProduct, known: Set<string>) =>
+      v2 ? toMenuItemV2(p as BeMenuProduct, known) : toMenuItem(p as BeProduct, known);
     const tree = cats?.categoryServicePublicCategories ?? [];
     const known = toCategories(tree);
     const ids = new Set(known.map((c) => c.id));
     // Danh mục có trong cây nhưng bị loại (dịch vụ/tắt/xoá) → bỏ món; id lạ (không có trong cây) → "Khác".
     const excluded = new Set(flattenCategories(tree).map((c) => c.id).filter((id) => !ids.has(id)));
-    const items = products
-      .map((p) => toMenuItem(p, ids))
+    const items = (products as (BeProduct | BeMenuProduct)[])
+      .map((p) => mapItem(p, ids))
       .filter((x): x is MenuItem => !!x && !excluded.has(x.categoryId))
       .map((x) => (ids.has(x.categoryId) ? x : { ...x, categoryId: OTHER_CATEGORY.id }));
     const used = new Set(items.map((x) => x.categoryId));
@@ -228,10 +345,31 @@ export const graphqlPosApi: PosApi = {
     const branchId = terminalSession.get()?.branchId || apiConfig.branchId || session.staff.branchId;
     let branch: Branch = { ...db.branch, id: branchId };
     if (branchId && branchId !== db.BRANCH_ID) {
-      const data = await gql<{ entityServiceBranchById: BeBranch }>(BRANCH_QUERY, { id: branchId });
-      const b = data.entityServiceBranchById;
-      // BE chưa có BranchSettings (3.6) → dùng cấu hình mặc định.
-      branch = { id: b.id, name: b.name, address: b.address, settings: db.branch.settings };
+      if (apiConfig.beFeatures.has('branch-settings')) {
+        const data = await gql<{ entityServiceBranchById: BeBranchV2 }>(BRANCH_QUERY_V2, { id: branchId });
+        const b = data.entityServiceBranchById;
+        branch = {
+          id: b.id,
+          name: b.name,
+          address: b.address,
+          phone: b.phoneNumber || undefined,
+          // Chi nhánh chưa cấu hình settings → mặc định của app (chỉ để hiển thị/xem trước — tiền thật do server tính).
+          // ⚠️ BE bug #6 (be-review-2026-10-11): khi đó restaurant âm thầm tính VAT 0% → bill có thể khác số app hiển thị.
+          settings: b.settings
+            ? {
+                taxRate: b.settings.taxRate,
+                pricesIncludeTax: b.settings.pricesIncludeTax,
+                serviceChargeRate: b.settings.serviceChargeRate,
+                cashRounding: b.settings.cashRounding,
+              }
+            : db.branch.settings,
+        };
+      } else {
+        const data = await gql<{ entityServiceBranchById: BeBranch }>(BRANCH_QUERY, { id: branchId });
+        const b = data.entityServiceBranchById;
+        // Cờ `branch-settings` tắt (Branch.settings chưa lên gateway) → dùng cấu hình mặc định.
+        branch = { id: b.id, name: b.name, address: b.address, settings: db.branch.settings };
+      }
     }
     return { staff: session.staff, branch };
   },

@@ -1,44 +1,57 @@
 // src/data/api/be/pin.ts — PIN nhân viên trên máy dùng chung (passiontech-auth). Cờ: `pin`.
-// Đề xuất: docs/pos/pos-be-api-request.md Mục 3.3 — POST /auth/pos/pin/login { deviceId, deviceSecret, pin }
-// → { accessToken, refreshToken, expiresIn, staff{ id, name, role, branchId } }. Token mang tenant/branch/role.
+// BE @ bb3e223c6: POST /api/v1/pos/auth/pin-login, header X-Tenant-Id, body { deviceId, deviceToken, branchId, pin }
+// → { code: 0, message, data: { staffJwt, staffCtx: { StaffID, Name, Role, BranchID } } } (staffCtx không có json tag → PascalCase).
+// Không có refresh token: hết hạn (exp trong JWT) → app đưa về màn PIN.
+// ⚠️ Route /api/v1/pos/auth/* đang bị edge ogw chặn 401 (be-review Mục 5) — chưa đăng nhập PIN được trên môi trường thật.
 import type { LoginResult, PosApi } from '@/data/api/PosApi';
-import { rest, unwrap } from '@/data/api/rest-client';
+import { POS_AUTH_BASE, rest, tenantHeader, unwrap } from '@/data/api/rest-client';
 import { getDeviceId } from '@/data/api/session';
 import { terminalSession } from '@/data/api/terminal';
+import { currentBranchId, currentTenantId } from '@/data/api/be/common';
+import { decodeJwt, jwtExpiresAt } from '@/data/api/be/jwt';
 import { PosApiError, type Staff, type StaffRole } from '@/data/types';
 
-export const PIN_LOGIN_PATH = '/auth/pos/pin/login';
+export const PIN_LOGIN_PATH = `${POS_AUTH_BASE}/pin-login`;
 
-export type BePosStaff = { id: string; name: string; role: string; branchId: string };
-export type BePinLoginResponse = { accessToken: string; refreshToken: string; expiresIn: number; staff: BePosStaff };
+/** Hạn dự phòng khi JWT không có exp (BE mặc định theo cấu hình access token, review ghi 1h). */
+const FALLBACK_TTL_SEC = 3600;
+
+export type BePosStaffCtx = { StaffID: string; Name: string; Role: string; BranchID: string };
+export type BePinLoginResponse = { staffJwt: string; staffCtx: BePosStaffCtx };
 
 const ROLES: StaffRole[] = ['OWNER', 'MANAGER', 'CASHIER', 'WAITER', 'KITCHEN'];
 
-/** Vai trò POS theo branch (3.3). Vai trò lạ → WAITER (ít quyền thao tác tiền nhất trên máy order). */
+/** Vai trò POS theo branch. Vai trò lạ → WAITER (ít quyền thao tác tiền nhất trên máy order). */
 export function toStaffRole(role: string | null | undefined): StaffRole {
   const r = (role ?? '').trim().toUpperCase() as StaffRole;
   return ROLES.includes(r) ? r : 'WAITER';
 }
 
-export const toStaff = (s: BePosStaff): Staff => ({ id: s.id, name: s.name, role: toStaffRole(s.role), branchId: s.branchId });
+export const toStaff = (s: BePosStaffCtx): Staff => ({
+  id: s.StaffID,
+  name: s.Name,
+  role: toStaffRole(s.Role),
+  branchId: s.BranchID,
+});
 
 export function toLoginResult(r: BePinLoginResponse, nowMs = Date.now()): LoginResult {
   return {
-    accessToken: r.accessToken,
-    refreshToken: r.refreshToken,
-    expiresAt: new Date(nowMs + r.expiresIn * 1000).toISOString(),
-    staff: toStaff(r.staff),
+    accessToken: r.staffJwt,
+    refreshToken: '', // BE không cấp refresh token cho POS
+    expiresAt: jwtExpiresAt(decodeJwt(r.staffJwt), FALLBACK_TTL_SEC, nowMs),
+    staff: toStaff(r.staffCtx),
   };
 }
 
 export const bePinApi = {
   async loginPin(pin) {
-    const deviceSecret = terminalSession.get()?.deviceSecret;
-    // 40301 "máy chưa đăng ký": chưa có deviceSecret từ POST /auth/pos/terminal/register.
-    if (!deviceSecret) throw new PosApiError('FORBIDDEN', 'Máy chưa được đăng ký để đăng nhập bằng PIN');
+    const deviceToken = terminalSession.get()?.deviceSecret;
+    // Chưa có deviceToken (máy chưa kích hoạt bằng mã — terminal.activateWithCode) → BE sẽ trả 40101.
+    if (!deviceToken) throw new PosApiError('FORBIDDEN', 'Máy chưa được đăng ký để đăng nhập bằng PIN');
     const raw = await rest<BePinLoginResponse | { data: BePinLoginResponse }>(PIN_LOGIN_PATH, {
       method: 'POST',
-      body: { deviceId: getDeviceId(), deviceSecret, pin },
+      headers: tenantHeader(currentTenantId()),
+      body: { deviceId: getDeviceId(), deviceToken, branchId: currentBranchId(), pin },
     });
     return toLoginResult(unwrap(raw));
   },

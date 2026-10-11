@@ -1,12 +1,12 @@
 // src/data/api/be/shifts.ts — ca thu ngân & báo cáo X/Z (passiontech-restaurant). Cờ: `shifts`.
-// SDL đề xuất: docs/pos/pos-be-api-request.md Mục 3.11. Ca theo máy (X-Device-Id, header do gql() gắn).
-// Đếm mù: CloseShift chỉ gửi countedCash; expected/variance do server trả trong báo cáo Z.
+// Schema thật: apps/passiontech-restaurant/internal/handler/graphql/shift.graphqls @ bb3e223c6.
+// Ca theo máy (X-Device-Id do gql() gắn). Đếm mù: CloseShift chỉ gửi countedCash; expected/variance do server trả.
 import { gql } from '@/data/api/graphql-client';
 import type { PosApi } from '@/data/api/PosApi';
-import { money, opt, optMoney, toPaymentMethod, toStaffRef, type BeStaffRef } from '@/data/api/be/common';
-import type { CashMovement, CashMovementType, Shift, ShiftReport, ShiftStatus } from '@/data/types';
+import { currentBranchId, money, opt, optMoney, toPaymentMethod, toStaffRef, type BeStaffRef } from '@/data/api/be/common';
+import type { CashMovement, CashMovementType, PaymentMethod, Shift, ShiftReport, ShiftStatus } from '@/data/types';
 
-// ── Kiểu BE (Mục 3.11) ──
+// ── Kiểu BE ──
 
 export type BePosShift = {
   id: string;
@@ -20,6 +20,7 @@ export type BePosShift = {
   closedBy?: BeStaffRef | null;
   closedAt?: string | null;
   countedCash?: number | null;
+  /** null khi ca OPEN và người gọi không phải MANAGER/OWNER (đếm mù). */
   expectedCash?: number | null;
   variance?: number | null;
   closeNote?: string | null;
@@ -35,14 +36,28 @@ export type BePosCashMovement = {
   createdAt: string;
 };
 
+/** PosServiceShiftReport — PHẲNG (contract lồng sales/voids/cash). */
 export type BePosShiftReport = {
   kind: string;
   shift: BePosShift;
   generatedAt: string;
-  sales: { bills: number; subtotal: number; discount: number; serviceCharge: number; tax: number; total: number; tips: number };
+  bills: number;
+  subtotal: number;
+  discountTotal: number;
+  serviceCharge: number;
+  tax: number;
+  tips: number;
+  total: number;
+  /** method: CASH | PAYOS_QR | SEPAY_QR | VIETQR | OTHER (shift_usecase.paymentMethodLabel) */
   payments: { method: string; count: number; amount: number }[];
-  voids: { lines: number; amount: number };
-  cash: { openingFloat: number; cashSales: number; cashIn: number; cashOut: number; expected: number };
+  voidLines: number;
+  voidAmount: number;
+  openingFloat: number;
+  cashSales: number;
+  cashIn: number;
+  cashOut: number;
+  /** 0 khi bị ẩn (ca OPEN, người gọi không phải MANAGER/OWNER). */
+  expectedCash: number;
   counted?: number | null;
   variance?: number | null;
 };
@@ -53,14 +68,13 @@ const SHIFT_FIELDS = `
   closedBy { id name }
 `;
 
-// Field con của PosShiftSales/PaymentLine/Voids/Cash lấy theo chú thích trong SDL 3.11.
 const REPORT_FIELDS = `
-  kind generatedAt counted variance
+  kind generatedAt
   shift { ${SHIFT_FIELDS} }
-  sales { bills subtotal discount serviceCharge tax total tips }
+  bills subtotal discountTotal serviceCharge tax tips total
   payments { method count amount }
-  voids { lines amount }
-  cash { openingFloat cashSales cashIn cashOut expected }
+  voidLines voidAmount
+  openingFloat cashSales cashIn cashOut expectedCash counted variance
 `;
 
 export const CURRENT_SHIFT = /* GraphQL */ `
@@ -75,19 +89,16 @@ export const SHIFT_REPORT = /* GraphQL */ `
   }
 `;
 
-// ⏳ chờ BE xác nhận tên/field: field của PosShiftPage (SDL chỉ nêu tên kiểu) — giả định { items total page pageSize }.
+/** BE trả mảng, không phân trang → FE tự chia trang. */
 export const LIST_SHIFTS = /* GraphQL */ `
-  query PosListShifts($branchId: ID!, $terminalId: String, $status: PosShiftStatus, $from: DateTime, $to: DateTime, $page: Int, $pageSize: Int) {
-    restaurantServiceListShifts(branchId: $branchId, terminalId: $terminalId, status: $status, from: $from, to: $to, page: $page, pageSize: $pageSize) {
-      items { ${SHIFT_FIELDS} }
-      total page pageSize
-    }
+  query PosListShifts($branchId: String!, $terminalId: String, $status: PosShiftStatus, $from: Time, $to: Time) {
+    restaurantServiceListShifts(branchId: $branchId, terminalId: $terminalId, status: $status, from: $from, to: $to) { ${SHIFT_FIELDS} }
   }
 `;
 
 export const OPEN_SHIFT = /* GraphQL */ `
-  mutation PosOpenShift($idempotencyKey: String!, $openingFloat: Int!) {
-    restaurantServiceOpenShift(idempotencyKey: $idempotencyKey, openingFloat: $openingFloat) { ${SHIFT_FIELDS} }
+  mutation PosOpenShift($idempotencyKey: String!, $openingFloat: Int!, $branchId: String!) {
+    restaurantServiceOpenShift(idempotencyKey: $idempotencyKey, openingFloat: $openingFloat, branchId: $branchId) { ${SHIFT_FIELDS} }
   }
 `;
 
@@ -139,6 +150,25 @@ export function toCashMovement(m: BePosCashMovement): CashMovement {
   };
 }
 
+/** Gộp dòng theo phương thức contract (PAYOS_QR + SEPAY_QR + VIETQR → VIETQR). Nhãn lạ (OTHER) bị bỏ. */
+function toReportPayments(rows: BePosShiftReport['payments']): ShiftReport['payments'] {
+  const out = new Map<PaymentMethod, { method: PaymentMethod; count: number; amount: number }>();
+  for (const p of rows) {
+    const method = toPaymentMethod(p.method);
+    if (!method) continue;
+    const cur = out.get(method) ?? { method, count: 0, amount: 0 };
+    cur.count += p.count;
+    cur.amount += money(p.amount);
+    out.set(method, cur);
+  }
+  return [...out.values()];
+}
+
+/**
+ * Báo cáo phẳng của BE → ShiftReport lồng của contract.
+ * Báo cáo X với người không phải MANAGER/OWNER: BE trả expectedCash = 0 và shift.expectedCash = null (đếm mù) →
+ * cash.expected = 0 nghĩa là "bị ẩn", không phải "két rỗng"; UI đã ẩn khối tiền mặt theo vai trò (ShiftReportCard showCash).
+ */
 export function toShiftReport(r: BePosShiftReport): ShiftReport {
   const kind = r.kind?.toUpperCase() === 'Z' ? 'Z' : 'X';
   return {
@@ -146,26 +176,23 @@ export function toShiftReport(r: BePosShiftReport): ShiftReport {
     shift: toShift(r.shift),
     generatedAt: r.generatedAt,
     sales: {
-      bills: r.sales.bills,
-      subtotal: money(r.sales.subtotal),
-      discount: money(r.sales.discount),
-      serviceCharge: money(r.sales.serviceCharge),
-      tax: money(r.sales.tax),
-      total: money(r.sales.total),
-      tips: money(r.sales.tips),
+      bills: r.bills,
+      subtotal: money(r.subtotal),
+      discount: money(r.discountTotal),
+      serviceCharge: money(r.serviceCharge),
+      tax: money(r.tax),
+      total: money(r.total),
+      tips: money(r.tips),
     },
-    // Dòng phương thức lạ bị bỏ (không có chỗ hiển thị trong contract).
-    payments: r.payments.flatMap((p) => {
-      const method = toPaymentMethod(p.method);
-      return method ? [{ method, count: p.count, amount: money(p.amount) }] : [];
-    }),
-    voids: { lines: r.voids.lines, amount: money(r.voids.amount) },
+    // ⚠️ BE bug #10 (be-review-2026-10-11): doanh thu tính theo ca của máy mở đơn, payment theo ca thu tiền → có thể lệch.
+    payments: toReportPayments(r.payments),
+    voids: { lines: r.voidLines, amount: money(r.voidAmount) },
     cash: {
-      openingFloat: money(r.cash.openingFloat),
-      cashSales: money(r.cash.cashSales),
-      cashIn: money(r.cash.cashIn),
-      cashOut: money(r.cash.cashOut),
-      expected: money(r.cash.expected),
+      openingFloat: money(r.openingFloat),
+      cashSales: money(r.cashSales),
+      cashIn: money(r.cashIn),
+      cashOut: money(r.cashOut),
+      expected: money(r.expectedCash),
     },
     counted: kind === 'Z' ? optMoney(r.counted) : undefined,
     variance: kind === 'Z' ? optMoney(r.variance) : undefined,
@@ -184,10 +211,12 @@ export const beShiftsApi = {
     const data = await gql<{ restaurantServiceOpenShift: BePosShift }>(OPEN_SHIFT, {
       idempotencyKey: input.idempotencyKey,
       openingFloat: input.openingFloat,
+      branchId: currentBranchId(),
     });
     return toShift(data.restaurantServiceOpenShift);
   },
 
+  // ⚠️ BE bug #9: gửi lại (retry cùng idempotencyKey) → panic nil ở BE (lỗi 5xx → hàng đợi offline thử lại tiếp).
   async addCashMovement(input) {
     const data = await gql<{ restaurantServiceAddCashMovement: BePosCashMovement }>(ADD_CASH_MOVEMENT, {
       idempotencyKey: input.idempotencyKey,
@@ -215,21 +244,18 @@ export const beShiftsApi = {
     return toShiftReport(data.restaurantServiceCloseShift);
   },
 
+  /** BE trả mảng → sắp openedAt mới nhất trước rồi cắt trang ở FE. */
   async listShifts(query) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
-    const data = await gql<{
-      restaurantServiceListShifts: { items: BePosShift[]; total: number; page?: number | null; pageSize?: number | null };
-    }>(LIST_SHIFTS, {
+    const data = await gql<{ restaurantServiceListShifts: BePosShift[] }>(LIST_SHIFTS, {
       branchId: query.branchId,
       terminalId: query.terminalId,
       from: query.from,
       to: query.to,
-      page,
-      pageSize,
     });
-    const r = data.restaurantServiceListShifts;
-    return { items: r.items.map(toShift), page: r.page ?? page, pageSize: r.pageSize ?? pageSize, total: r.total };
+    const all = [...data.restaurantServiceListShifts].sort((a, b) => b.openedAt.localeCompare(a.openedAt));
+    return { items: all.slice((page - 1) * pageSize, page * pageSize).map(toShift), page, pageSize, total: all.length };
   },
 } satisfies Pick<
   PosApi,
