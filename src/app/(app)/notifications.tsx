@@ -2,6 +2,7 @@
 // Nút "Giả lập món sẵn sàng" minh hoạ push→deep-link (local notification thay FCM).
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, FlatList, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BellRing, ChevronLeft, CircleAlert, Tag, Utensils } from 'lucide-react-native';
@@ -22,6 +23,7 @@ const KIND_META: Record<NotificationKind, { icon: typeof BellRing; color: string
 };
 
 export default function Notifications() {
+  const { t } = useTranslation();
   const router = useRouter();
   const notifications = useNotifications();
   const runningOrders = useRunningOrders();
@@ -43,9 +45,12 @@ export default function Notifications() {
   // Demo: giả lập bếp báo "món sẵn sàng" cho 1 đơn đang chạy.
   const simulate = async () => {
     const order = runningOrders.data?.find((o) => o.tableId);
-    if (!order?.tableId) return toast.info('Chưa có đơn', 'Tạo đơn có bàn để thử');
-    const ok = await notifyKitchenReady(order.tableId, order.tableName ?? 'Bàn');
-    toast[ok ? 'success' : 'error'](ok ? 'Đã gửi thông báo thử' : 'Bị chặn quyền', ok ? 'Sẽ hiện sau ~2s' : 'Bật quyền thông báo');
+    if (!order?.tableId) return toast.info(t('notifications.noOrder'), t('notifications.noOrderHint'));
+    const ok = await notifyKitchenReady(order.tableId, order.tableName ?? t('common.table'));
+    toast[ok ? 'success' : 'error'](
+      ok ? t('notifications.testSent') : t('notifications.blocked'),
+      ok ? t('notifications.testSentHint') : t('notifications.blockedHint')
+    );
   };
 
   return (
@@ -54,10 +59,10 @@ export default function Notifications() {
         <Pressable onPress={() => router.back()} className="mr-2 h-10 w-10 items-center justify-center rounded-full bg-surface active:opacity-70">
           <ChevronLeft size={22} color={color.text.primary} />
         </Pressable>
-        <Text className="flex-1 text-xl font-extrabold text-fg">Thông báo</Text>
+        <Text className="flex-1 text-xl font-extrabold text-fg">{t('nav.notifications')}</Text>
         {unread > 0 && (
           <Pressable onPress={markAllRead} className="active:opacity-60">
-            <Text className="font-semibold text-brand">Đọc tất cả</Text>
+            <Text className="font-semibold text-brand">{t('notifications.markAllRead')}</Text>
           </Pressable>
         )}
       </View>
@@ -77,10 +82,10 @@ export default function Notifications() {
           ListHeaderComponent={
             <Pressable onPress={simulate} className="mb-2 flex-row items-center justify-center rounded-2xl border border-line bg-surface py-3 active:opacity-70">
               <BellRing size={16} color={color.brand.DEFAULT} />
-              <Text className="ml-2 font-semibold text-brand">Giả lập bếp báo "món sẵn sàng"</Text>
+              <Text className="ml-2 font-semibold text-brand">{t('notifications.simulate')}</Text>
             </Pressable>
           }
-          ListEmptyComponent={<Text className="py-16 text-center text-muted">Chưa có thông báo</Text>}
+          ListEmptyComponent={<Text className="py-16 text-center text-muted">{t('notifications.empty')}</Text>}
           renderItem={({ item }) => {
             const meta = KIND_META[item.kind];
             const Icon = meta.icon;

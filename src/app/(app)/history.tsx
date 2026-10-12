@@ -14,12 +14,13 @@ import { haptics } from '@/lib/haptics';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import type { Bill, PaymentMethod } from '@/data/types';
+import { methodLabelKey } from '@/lib/status';
 
-const METHOD: Record<PaymentMethod, { label: string; color: string }> = {
-  cash: { label: 'Tiền mặt', color: color.status.available },
-  qr: { label: 'VietQR', color: color.status.reserved },
-  card: { label: 'Thẻ', color: color.brand.DEFAULT },
-  ewallet: { label: 'Ví', color: color.status.pending },
+const METHOD: Record<PaymentMethod, { labelKey: string; color: string }> = {
+  CASH: { labelKey: methodLabelKey.CASH, color: color.status.available },
+  VIETQR: { labelKey: methodLabelKey.VIETQR, color: color.status.reserved },
+  CARD: { labelKey: methodLabelKey.CARD, color: color.brand.DEFAULT },
+  EWALLET: { labelKey: 'paymentMethod.ewalletShort', color: color.status.pending },
 };
 
 export default function History() {
@@ -31,7 +32,7 @@ export default function History() {
   const bills = useMemo(
     () =>
       (q.data?.pages.flatMap((p) => p.items) ?? []).sort(
-        (a, b) => +new Date(b.paidAt) - +new Date(a.paidAt)
+        (a, b) => (b.paidAt ?? '').localeCompare(a.paidAt ?? '')
       ),
     [q.data]
   );
@@ -51,7 +52,7 @@ export default function History() {
         <TextInput
           value={search}
           onChangeText={setSearch}
-          placeholder="Tìm mã HĐ / khách…"
+          placeholder={t('history.searchPlaceholder')}
           placeholderTextColor={color.text.muted}
           className="flex-1 px-2 py-3 text-base text-fg"
         />
@@ -78,13 +79,15 @@ export default function History() {
 }
 
 function BillRow({ bill }: { bill: Bill }) {
-  const m = METHOD[bill.paymentMethod];
+  const { t } = useTranslation();
+  const paid = bill.payments.filter((p) => p.status === 'SUCCEEDED');
+  const m = METHOD[paid[paid.length - 1]?.method ?? 'CASH'];
   const reprint = async () => {
     haptics.light();
     const res = await printReceipt(bill);
-    if (res.printed) toast.success('Đã in lại', bill.code);
-    else if (res.reason === 'unsupported') toast.info('Không có máy in Sunmi', bill.code);
-    else toast.error('In lỗi', bill.code);
+    if (res.printed) toast.success(t('printer.reprinted'), bill.code);
+    else if (res.reason === 'unsupported') toast.info(t('printer.noSunmi'), bill.code);
+    else toast.error(t('printer.error'), bill.code);
   };
   return (
     <View className="flex-row items-center rounded-2xl border border-line bg-surface p-4">
@@ -92,11 +95,11 @@ function BillRow({ bill }: { bill: Bill }) {
         <View className="flex-row items-center gap-2">
           <Text className="font-bold text-fg">{bill.code}</Text>
           <View className="rounded-full px-2 py-0.5" style={{ backgroundColor: `${m.color}22` }}>
-            <Text className="text-[10px] font-semibold" style={{ color: m.color }}>{m.label}</Text>
+            <Text className="text-[10px] font-semibold" style={{ color: m.color }}>{t(m.labelKey)}</Text>
           </View>
         </View>
         <Text className="mt-1 text-xs text-muted">
-          {bill.tableName ?? '—'} · {bill.customerName} · {formatDateTime(bill.paidAt)}
+          {bill.tableName ?? '—'} · {bill.customerName} · {formatDateTime(bill.paidAt ?? bill.createdAt)}
         </Text>
         <Text className="mt-1 font-extrabold text-brand">{formatMoney(bill.total)}</Text>
       </View>

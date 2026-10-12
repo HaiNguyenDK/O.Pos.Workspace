@@ -1,90 +1,139 @@
-// Màn 5 — Giỏ: dòng đã gửi (read-only) + dòng mới (sửa qty/note/huỷ), move/merge, gửi bếp.
+// Màn 5 — Giỏ: dòng đã gửi (từ server, có trạng thái bếp, huỷ được) + dòng chờ gửi offline
+// + dòng mới (sửa qty/huỷ), move/merge, gửi bếp. Gửi bếp = addLines CHỈ dòng mới (D6).
 import { onlineManager } from '@tanstack/react-query';
 import { Redirect, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useRef } from 'react';
-import { ScrollView } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, Minus, MoveRight, Plus, Trash2, Users } from 'lucide-react-native';
+import { ChevronLeft, CloudOff, Minus, MoveRight, Plus, Trash2, Users } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
 import { StatusChip } from '@/components/ui/status-chip';
+import { ApprovalSheet, type ApprovalSheetHandle } from '@/components/sheets/approval-sheet';
 import { MoveTableSheet, type MoveTableSheetHandle } from '@/components/sheets/move-table-sheet';
 import { MergeTablesSheet, type MergeTablesSheetHandle } from '@/components/sheets/merge-tables-sheet';
-import { useMergeTables, useMoveTable, useSendToKitchen } from '@/data/queries';
-import { calcTotal } from '@/domain/pricing';
+import {
+  useAddLines,
+  useBranchSettings,
+  useMergeOrders,
+  useMoveOrder,
+  useOrder,
+  useVoidLine,
+} from '@/data/queries';
+import { modifierText } from '@/domain/modifiers';
+import { calcBill, calcSubtotal, taxLabel } from '@/domain/pricing';
+import { isPosApiError, type OrderLine } from '@/data/types';
 import { formatMoney } from '@/lib/format';
+import { newId } from '@/lib/id';
+import { lineLabelKey, lineTone } from '@/lib/status';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { haptics } from '@/lib/haptics';
-import { useCartStore } from '@/store/cart-store';
+import { useActionKey } from '@/lib/use-action-key';
+import { toNewLine, useCartStore, type CartLine } from '@/store/cart-store';
 import { useOrderStore } from '@/store/order-store';
 import { useOfflineQueueStore } from '@/store/offline-queue-store';
-import type { OrderLine } from '@/data/types';
 
-/** Gộp dòng theo menuItemId|note để tạo danh sách items đầy đủ gửi bếp. */
-function mergeLines(a: OrderLine[], b: OrderLine[]): OrderLine[] {
-  const map = new Map<string, OrderLine>();
-  for (const l of [...a, ...b]) {
-    const key = `${l.menuItemId}|${l.note ?? ''}`;
-    const found = map.get(key);
-    if (found) found.quantity += l.quantity;
-    else map.set(key, { ...l });
-  }
-  return [...map.values()];
-}
+const VOID_REASON_KEYS = ['cart.voidReasons.changedMind', 'cart.voidReasons.wrongEntry', 'cart.voidReasons.outOfStock'];
 
 export default function Cart() {
   const { t } = useTranslation();
   const router = useRouter();
   const moveSheet = useRef<MoveTableSheetHandle>(null);
   const mergeSheet = useRef<MergeTablesSheetHandle>(null);
+  const approvalSheet = useRef<ApprovalSheetHandle>(null);
 
   const active = useOrderStore((s) => s.active);
-  const sentLines = useOrderStore((s) => s.sentLines);
   const setActive = useOrderStore((s) => s.setActive);
-  const setSentLines = useOrderStore((s) => s.setSentLines);
   const lines = useCartStore((s) => s.lines);
   const setQty = useCartStore((s) => s.setQty);
-  const removeItem = useCartStore((s) => s.removeItem);
+  const removeLine = useCartStore((s) => s.removeLine);
   const clearCart = useCartStore((s) => s.clear);
-
-  const sendToKitchen = useSendToKitchen();
-  const moveTable = useMoveTable();
-  const mergeTables = useMergeTables();
+  const queue = useOfflineQueueStore((st) => st.queue);
   const enqueueOffline = useOfflineQueueStore((st) => st.enqueue);
+  const removeQueued = useOfflineQueueStore((st) => st.remove);
+
+  const order = useOrder(active?.orderId);
+  const settings = useBranchSettings();
+  const addLines = useAddLines();
+  const voidLine = useVoidLine();
+  const moveOrder = useMoveOrder();
+  const mergeOrders = useMergeOrders();
+  const sendKey = useActionKey();
 
   if (!active) return <Redirect href="/(app)/home" />;
 
-  const allLines = mergeLines(sentLines, lines);
-  const totals = calcTotal(allLines);
+  const sent = (order.data?.lines ?? []).filter((l) => l.status !== 'VOIDED');
+  const queued = queue.filter((q) => q.orderId === active.orderId);
+  const queuedLines = queued.flatMap((q) => q.lines);
+  const preview = settings
+    ? calcBill([...sent, ...queuedLines, ...lines], settings)
+    : null;
   const hasNew = lines.length > 0;
+  const canPay = sent.length > 0 && !hasNew && queued.length === 0;
+
+  const queueOffline = (key: string, toSend: CartLine[]) => {
+    enqueueOffline({ idempotencyKey: key, orderId: active.orderId, tableName: active.tableName, lines: toSend });
+    clearCart();
+    sendKey.reset();
+    haptics.warning();
+    toast.info(t('cart.savedOffline'), t('cart.savedOfflineHint'));
+  };
 
   const send = () => {
-    // Mất mạng → xếp hàng đợi (persist), gửi bếp khi có mạng lại (offline queue P1).
-    if (!onlineManager.isOnline()) {
-      haptics.warning();
-      enqueueOffline({ orderId: active.orderId, tableName: active.tableName, lines: allLines });
-      setSentLines(allLines);
-      clearCart();
-      toast.info('Đã lưu offline', 'Sẽ tự gửi bếp khi có mạng lại');
-      return;
-    }
-    sendToKitchen.mutate(
-      { orderId: active.orderId, lines: allLines },
+    const key = sendKey.key();
+    const toSend = lines;
+    // Mất mạng → xếp hàng đợi (persist) với đúng key; gửi bếp khi có mạng lại.
+    if (!onlineManager.isOnline()) return queueOffline(key, toSend);
+    addLines.mutate(
+      { idempotencyKey: key, orderId: active.orderId, lines: toSend.map(toNewLine) },
       {
-        onSuccess: (order) => {
+        onSuccess: () => {
           haptics.success();
-          setSentLines(order.items);
           clearCart();
-          toast.success('Đã gửi bếp', `${order.items.length} món · ${active.tableName ?? 'Mang về'}`);
+          sendKey.reset();
+          toast.success(t('cart.sent'), t('cart.sentDetail', { count: toSend.length, table: active.tableName ?? t('common.takeaway') }));
         },
         onError: (e) => {
+          // Lỗi mạng giữa chừng → không biết server đã nhận chưa: xếp hàng với CÙNG key (server bỏ qua nếu trùng).
+          if (!isPosApiError(e)) return queueOffline(key, toSend);
+          sendKey.settle(e);
           haptics.error();
-          toast.error(t('common.error'), (e as Error).message);
+          toast.error(t('common.error'), e.message);
         },
       }
     );
+  };
+
+  const doVoid = (line: OrderLine, reason: string, approvalToken?: string) =>
+    voidLine.mutate(
+      { idempotencyKey: newId(), orderId: active.orderId, lineId: line.id, reason, approvalToken },
+      {
+        onSuccess: () => toast.success(t('cart.voided'), line.name),
+        onError: (e) => toast.error(t('common.error'), (e as Error).message),
+      }
+    );
+
+  const askVoid = (line: OrderLine) =>
+    Alert.alert(t('cart.voidTitle', { qty: line.quantity, name: line.name }), t('cart.voidChooseReason'), [
+      ...VOID_REASON_KEYS.map((k) => t(k)).map((reason) => ({
+        text: reason,
+        onPress: () =>
+          line.status === 'FIRED'
+            ? doVoid(line, reason)
+            : approvalSheet.current?.request('VOID_LINE', t('cart.voidApproval', { name: line.name }), (a) =>
+                doVoid(line, reason, a.approvalToken)
+              ),
+      })),
+      { text: t('cart.voidKeep'), style: 'cancel' },
+    ]);
+
+  const onConflict = (e: unknown) => {
+    if (isPosApiError(e) && e.code === 'VERSION_CONFLICT') {
+      order.refetch();
+      toast.error(t('common.orderChanged'), t('cart.reloadedRetry'));
+    } else toast.error(t('common.error'), (e as Error).message);
   };
 
   return (
@@ -95,41 +144,80 @@ export default function Cart() {
           <ChevronLeft size={22} color={color.text.primary} />
         </Pressable>
         <View className="flex-1">
-          <Text className="text-xl font-extrabold text-fg">{active.tableName ?? 'Mang về'}</Text>
-          <Text className="text-xs text-muted">{active.customerName}</Text>
+          <Text className="text-xl font-extrabold text-fg">{active.tableName ?? t('common.takeaway')}</Text>
+          <Text className="text-xs text-muted">
+            {active.customerName}
+            {order.data ? ` · ${order.data.code}` : ''}
+          </Text>
         </View>
       </View>
 
       {/* Move / Merge */}
-      {active.mode === 'dine-in' && (
+      {active.mode === 'DINE_IN' && (
         <View className="mb-2 flex-row gap-3 px-4">
           <Pressable onPress={() => moveSheet.current?.present()} className="flex-1 flex-row items-center justify-center rounded-xl border border-line bg-surface py-3 active:opacity-70">
             <MoveRight size={16} color={color.text.primary} />
-            <Text className="ml-2 font-semibold text-fg">Chuyển bàn</Text>
+            <Text className="ml-2 font-semibold text-fg">{t('common.moveTable')}</Text>
           </Pressable>
           <Pressable onPress={() => mergeSheet.current?.present()} className="flex-1 flex-row items-center justify-center rounded-xl border border-line bg-surface py-3 active:opacity-70">
             <Users size={16} color={color.text.primary} />
-            <Text className="ml-2 font-semibold text-fg">Gộp bàn</Text>
+            <Text className="ml-2 font-semibold text-fg">{t('common.mergeTables')}</Text>
           </Pressable>
         </View>
       )}
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 10, paddingBottom: 20 }}>
-        {/* Đã gửi */}
-        {sentLines.length > 0 && (
+        {/* Đã gửi (server) */}
+        {order.isLoading && <ActivityIndicator color={color.brand.DEFAULT} />}
+        {sent.length > 0 && (
           <View className="gap-2">
-            <View className="flex-row items-center gap-2">
-              <Text className="font-bold text-muted">Đã gửi bếp</Text>
-              <StatusChip status="ready" label="đã gửi" />
-            </View>
-            {sentLines.map((l, i) => (
-              <View key={`s${i}`} className="flex-row items-center rounded-2xl border border-line bg-surface px-4 py-3">
+            <Text className="font-bold text-muted">{t('cart.sent')}</Text>
+            {sent.map((l) => (
+              <View key={l.id} className="flex-row items-center rounded-2xl border border-line bg-surface px-4 py-3">
                 <Text className="w-8 font-bold text-brand">{l.quantity}×</Text>
                 <View className="flex-1">
                   <Text className="font-semibold text-fg">{l.name}</Text>
+                  {l.modifiers.length > 0 && <Text className="text-xs text-muted">{modifierText(l.modifiers)}</Text>}
                   {!!l.note && <Text className="text-xs text-muted">{l.note}</Text>}
+                  <View className="mt-1">
+                    <StatusChip status={lineTone[l.status]} label={t(lineLabelKey[l.status])} />
+                  </View>
                 </View>
-                <Text className="text-muted">{formatMoney(l.price * l.quantity)}</Text>
+                <Text className="text-muted">{formatMoney(l.lineTotal)}</Text>
+                {l.status !== 'SERVED' && (
+                  <Pressable onPress={() => askVoid(l)} hitSlop={8} className="ml-3 active:opacity-60">
+                    <Trash2 size={18} color={color.status.cancelled} />
+                  </Pressable>
+                )}
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Chờ gửi (offline) */}
+        {queued.length > 0 && (
+          <View className="gap-2">
+            <View className="flex-row items-center gap-2">
+              <CloudOff size={14} color={color.status.pending} />
+              <Text className="font-bold text-muted">{t('cart.queuedTitle')}</Text>
+            </View>
+            {queued.map((q) => (
+              <View key={q.idempotencyKey} className="gap-1 rounded-2xl border border-line bg-surface px-4 py-3">
+                {q.lines.map((l) => (
+                  <Text key={l.lineId} className="text-fg">
+                    {l.quantity}× {l.name}{l.modifiers.length > 0 ? ` (${modifierText(l.modifiers)})` : ''}
+                  </Text>
+                ))}
+                {!!q.error && (
+                  <View className="mt-1 flex-row items-center justify-between">
+                    <Text className="flex-1 text-xs" style={{ color: color.status.cancelled }}>
+                      {t('cart.sendFailed', { error: q.error })}
+                    </Text>
+                    <Pressable onPress={() => removeQueued(q.idempotencyKey)} hitSlop={8} className="ml-2 active:opacity-60">
+                      <Text className="text-xs font-bold text-brand">{t('cart.discard')}</Text>
+                    </Pressable>
+                  </View>
+                )}
               </View>
             ))}
           </View>
@@ -137,27 +225,28 @@ export default function Cart() {
 
         {/* Món mới */}
         <View className="mt-2 gap-2">
-          <Text className="font-bold text-muted">Món mới</Text>
+          <Text className="font-bold text-muted">{t('cart.newItems')}</Text>
           {lines.length === 0 ? (
             <Text className="py-4 text-center text-muted">{t('cart.empty')}</Text>
           ) : (
             lines.map((l) => (
-              <View key={`${l.menuItemId}|${l.note ?? ''}`} className="rounded-2xl border border-line bg-surface px-4 py-3">
+              <View key={l.lineId} className="rounded-2xl border border-line bg-surface px-4 py-3">
                 <View className="flex-row items-center">
                   <View className="flex-1">
                     <Text className="font-semibold text-fg">{l.name}</Text>
+                    {l.modifiers.length > 0 && <Text className="text-xs text-muted">{modifierText(l.modifiers)}</Text>}
                     {!!l.note && <Text className="text-xs text-muted">{l.note}</Text>}
-                    <Text className="mt-0.5 text-brand">{formatMoney(l.price * l.quantity)}</Text>
+                    <Text className="mt-0.5 text-brand">{formatMoney(calcSubtotal([l]))}</Text>
                   </View>
                   <View className="flex-row items-center gap-3">
-                    <Pressable onPress={() => setQty(l.menuItemId, l.quantity - 1)} className="h-9 w-9 items-center justify-center rounded-full bg-elevated active:opacity-70">
+                    <Pressable onPress={() => setQty(l.lineId, l.quantity - 1)} className="h-9 w-9 items-center justify-center rounded-full bg-elevated active:opacity-70">
                       <Minus size={16} color={color.text.primary} />
                     </Pressable>
                     <Text className="w-5 text-center font-extrabold text-fg">{l.quantity}</Text>
-                    <Pressable onPress={() => setQty(l.menuItemId, l.quantity + 1)} className="h-9 w-9 items-center justify-center rounded-full bg-brand active:opacity-80">
+                    <Pressable onPress={() => setQty(l.lineId, l.quantity + 1)} className="h-9 w-9 items-center justify-center rounded-full bg-brand active:opacity-80">
                       <Plus size={16} color="#fff" />
                     </Pressable>
-                    <Pressable onPress={() => removeItem(l.menuItemId)} hitSlop={8} className="ml-1 active:opacity-60">
+                    <Pressable onPress={() => removeLine(l.lineId)} hitSlop={8} className="ml-1 active:opacity-60">
                       <Trash2 size={18} color={color.status.cancelled} />
                     </Pressable>
                   </View>
@@ -168,21 +257,25 @@ export default function Cart() {
         </View>
       </ScrollView>
 
-      {/* Totals + actions */}
+      {/* Totals (xem trước — số chuẩn ở màn hoá đơn) + actions */}
       <View className="border-t border-line px-4 py-4">
-        <Row label="Tạm tính" value={formatMoney(totals.subtotal)} />
-        <Row label="Thuế (VAT 10%)" value={formatMoney(totals.tax)} />
-        <View className="mb-3 mt-1 flex-row justify-between">
-          <Text className="text-base font-bold text-fg">Tổng cộng</Text>
-          <Text className="text-xl font-extrabold text-brand">{formatMoney(totals.total)}</Text>
-        </View>
+        {preview && settings && (
+          <>
+            <Row label={t('common.subtotal')} value={formatMoney(preview.subtotal)} />
+            <Row label={t('common.tax', { rate: taxLabel(settings.taxRate) })} value={formatMoney(preview.tax)} />
+            <View className="mb-3 mt-1 flex-row justify-between">
+              <Text className="text-base font-bold text-fg">{t('cart.totalPreview')}</Text>
+              <Text className="text-xl font-extrabold text-brand">{formatMoney(preview.total)}</Text>
+            </View>
+          </>
+        )}
 
         <View className="flex-row gap-3">
-          <Button className="flex-1" variant="ghost" label="Thêm món" onPress={() => router.push('/(app)/menu')} />
+          <Button className="flex-1" variant="ghost" label={t('cart.addItems')} onPress={() => router.push('/(app)/menu')} />
           {hasNew ? (
-            <Button className="flex-1" label={t('cart.sendToKitchen')} onPress={send} loading={sendToKitchen.isPending} />
+            <Button className="flex-1" label={t('cart.sendToKitchen')} onPress={send} loading={addLines.isPending} />
           ) : (
-            <Button className="flex-1" variant="cart" label="Thanh toán" onPress={() => router.push('/(app)/bill')} disabled={sentLines.length === 0} />
+            <Button className="flex-1" variant="cart" label={t('common.pay')} onPress={() => router.push('/(app)/bill')} disabled={!canPay} />
           )}
         </View>
       </View>
@@ -191,31 +284,38 @@ export default function Cart() {
         ref={moveSheet}
         currentTableId={active.tableId}
         onSelect={(toTableId) =>
-          moveTable.mutate(
-            { orderId: active.orderId, toTableId },
+          order.data &&
+          moveOrder.mutate(
+            { idempotencyKey: newId(), orderId: active.orderId, toTableId, expectedVersion: order.data.version },
             {
-              onSuccess: (order) => {
-                setActive({ ...active, tableId: order.tableId, tableName: order.tableName }, sentLines);
-                toast.success('Đã chuyển bàn', order.tableName);
+              onSuccess: (o) => {
+                setActive({ ...active, tableId: o.tableId, tableName: o.tableName });
+                toast.success(t('cart.moved'), o.tableName);
               },
-              onError: (e) => toast.error(t('common.error'), (e as Error).message),
+              onError: onConflict,
             }
           )
         }
       />
       <MergeTablesSheet
         ref={mergeSheet}
-        currentTableId={active.tableId}
-        onConfirm={(tableIds) =>
-          mergeTables.mutate(
-            { orderId: active.orderId, tableIds },
+        currentOrderId={active.orderId}
+        onConfirm={(sources) =>
+          mergeOrders.mutate(
             {
-              onSuccess: () => toast.success('Đã gộp bàn', `${tableIds.length} bàn`),
-              onError: (e) => toast.error(t('common.error'), (e as Error).message),
+              idempotencyKey: newId(),
+              primaryOrderId: active.orderId,
+              sourceOrderIds: sources.map((s) => s.id),
+              expectedVersions: sources.map((s) => s.version),
+            },
+            {
+              onSuccess: () => toast.success(t('cart.merged'), t('common.tables', { count: sources.length })),
+              onError: onConflict,
             }
           )
         }
       />
+      <ApprovalSheet ref={approvalSheet} />
     </SafeAreaView>
   );
 }

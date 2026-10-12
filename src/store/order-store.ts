@@ -1,28 +1,24 @@
-// src/store/order-store.ts — ngữ cảnh ĐƠN ĐANG MỞ (chia sẻ giữa table→menu→cart).
-// cartStore giữ dòng MỚI chưa gửi; orderStore giữ định danh đơn + snapshot dòng ĐÃ gửi.
+// src/store/order-store.ts — ngữ cảnh ĐƠN ĐANG MỞ (chia sẻ giữa table→menu→cart→bill).
+// Chỉ giữ định danh; dòng món, version, trạng thái luôn đọc từ server (useOrder) — D7.
 import { create } from 'zustand';
-import type { OrderLine, ServiceMode } from '@/data/types';
+import type { ServiceMode } from '@/data/types';
 
-type ActiveOrder = {
+export type ActiveOrder = {
   orderId: string;
   tableId?: string;
   tableName?: string;
-  customerName: string;
+  customerName?: string;
   mode: ServiceMode;
 };
 
 type OrderState = {
   active: ActiveOrder | null;
-  sentLines: OrderLine[]; // đã gửi bếp (read-only trong giỏ)
-  setActive: (o: ActiveOrder, sentLines?: OrderLine[]) => void;
-  setSentLines: (lines: OrderLine[]) => void;
+  setActive: (o: ActiveOrder) => void;
   clear: () => void;
 };
 
 export const useOrderStore = create<OrderState>((set) => ({
   active: null,
-  sentLines: [],
-  setActive: (active, sentLines = []) => set({ active, sentLines }),
-  setSentLines: (sentLines) => set({ sentLines }),
-  clear: () => set({ active: null, sentLines: [] }),
+  setActive: (active) => set({ active }),
+  clear: () => set({ active: null }),
 }));

@@ -3,6 +3,7 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
@@ -20,6 +21,7 @@ function parseTableId(raw: string): string | null {
 }
 
 export default function Scan() {
+  const { t } = useTranslation();
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
   const tables = useTables();
@@ -32,20 +34,20 @@ export default function Scan() {
     lastScan.current = now;
 
     const id = parseTableId(data);
-    const table = tables.data?.find((t) => t.id === id || t.name === id);
+    const table = tables.data?.find((tb) => tb.id === id || tb.name === id);
     if (!table) {
-      toast.error('QR không hợp lệ', data.slice(0, 24));
+      toast.error(t('scan.invalid'), data.slice(0, 24));
       return;
     }
     setLocked(true);
-    toast.success('Đã nhận bàn', table.name);
+    toast.success(t('scan.found'), table.name);
     router.replace(`/(app)/table/${table.id}`);
   };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }}>
       <View className="flex-row items-center justify-between px-4 py-3">
-        <Text className="text-xl font-extrabold text-white">Quét QR bàn</Text>
+        <Text className="text-xl font-extrabold text-white">{t('scan.title')}</Text>
         <Pressable onPress={() => router.back()} className="h-10 w-10 items-center justify-center rounded-full bg-elevated active:opacity-70">
           <X size={22} color="#fff" />
         </Pressable>
@@ -53,12 +55,12 @@ export default function Scan() {
 
       {!permission ? (
         <View className="flex-1 items-center justify-center">
-          <Text className="text-muted">Đang kiểm tra quyền camera…</Text>
+          <Text className="text-muted">{t('scan.checkingPermission')}</Text>
         </View>
       ) : !permission.granted ? (
         <View className="flex-1 items-center justify-center px-8">
-          <Text className="mb-4 text-center text-muted">Cần quyền camera để quét mã QR bàn.</Text>
-          <Button label="Cấp quyền camera" onPress={requestPermission} />
+          <Text className="mb-4 text-center text-muted">{t('scan.needPermission')}</Text>
+          <Button label={t('scan.grantPermission')} onPress={requestPermission} />
         </View>
       ) : (
         <View className="flex-1">
@@ -71,7 +73,7 @@ export default function Scan() {
           {/* Khung ngắm */}
           <View pointerEvents="none" className="absolute inset-0 items-center justify-center">
             <View className="h-60 w-60 rounded-3xl border-2 border-brand" />
-            <Text className="mt-6 text-center text-white">Đưa mã QR trên bàn vào khung</Text>
+            <Text className="mt-6 text-center text-white">{t('scan.aim')}</Text>
           </View>
         </View>
       )}

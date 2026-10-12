@@ -2,6 +2,7 @@
 // Đồng thời tự flush hàng đợi khi có mạng lại (mount 1 lần ở app layout).
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CloudOff } from 'lucide-react-native';
 import { Text, View } from '@/tw';
@@ -11,8 +12,10 @@ import { toast } from '@/lib/toast';
 import { useOfflineQueueStore } from '@/store/offline-queue-store';
 
 export function ConnectivityBanner() {
+  const { t } = useTranslation();
   const online = useIsOnline();
-  const pending = useOfflineQueueStore((s) => s.queue.length);
+  const pending = useOfflineQueueStore((s) => s.queue.filter((q) => !q.error).length);
+  const failed = useOfflineQueueStore((s) => s.queue.filter((q) => q.error).length);
   const qc = useQueryClient();
   const insets = useSafeAreaInsets();
   const wasOnline = useRef(online);
@@ -20,14 +23,15 @@ export function ConnectivityBanner() {
   // Vừa có mạng lại → flush hàng đợi.
   useEffect(() => {
     if (online && !wasOnline.current && pending > 0) {
-      flushOfflineQueue(qc).then((n) => {
-        if (n > 0) toast.success('Đã gửi bếp', `${n} đơn chờ đã được gửi`);
+      flushOfflineQueue(qc).then(({ sent, failed: f }) => {
+        if (sent > 0) toast.success(t('cart.sent'), t('offline.flushed', { count: sent }));
+        if (f > 0) toast.error(t('offline.flushFailed'), t('offline.flushFailedHint'));
       });
     }
     wasOnline.current = online;
-  }, [online, pending, qc]);
+  }, [online, pending, qc, t]);
 
-  if (online && pending === 0) return null;
+  if (online && pending === 0 && failed === 0) return null;
 
   return (
     <View
@@ -37,7 +41,13 @@ export function ConnectivityBanner() {
     >
       <CloudOff size={14} color="#fff" />
       <Text className="ml-2 text-xs font-bold text-white">
-        {online ? `Đang gửi ${pending} đơn chờ…` : `Mất mạng${pending > 0 ? ` · ${pending} đơn chờ gửi` : ''}`}
+        {!online
+          ? pending > 0
+            ? t('offline.offlinePending', { count: pending })
+            : t('offline.offline')
+          : pending > 0
+            ? t('offline.sending', { count: pending })
+            : t('offline.failed', { count: failed })}
       </Text>
     </View>
   );

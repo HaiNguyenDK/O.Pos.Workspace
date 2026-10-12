@@ -1,22 +1,18 @@
 // src/components/ui/order-row.tsx — dòng đơn đang chạy (tab "Đơn" màn home).
+// Số tiền là tạm tính các món chưa huỷ (Order không mang tổng — tổng chuẩn nằm ở Bill).
 import { ChevronRight } from 'lucide-react-native';
+import { useTranslation } from 'react-i18next';
 import { Pressable, Text, View } from '@/tw';
 import { StatusChip } from '@/components/ui/status-chip';
+import { calcSubtotal } from '@/domain/pricing';
 import { color } from '@/lib/theme';
 import { formatMoney, formatTime } from '@/lib/format';
-import type { Order, OrderStatus } from '@/data/types';
-
-// Order status → status-chip key (traffic-light). served/completed coi như paid tone.
-const toChip = (s: OrderStatus): keyof typeof color.status =>
-  s === 'pending' || s === 'preparing'
-    ? 'pending'
-    : s === 'ready'
-      ? 'ready'
-      : s === 'cancelled'
-        ? 'cancelled'
-        : 'paid';
+import { orderLabelKey, orderTone } from '@/lib/status';
+import type { Order } from '@/data/types';
 
 export function OrderRow({ order, onPress }: { order: Order; onPress?: () => void }) {
+  const { t } = useTranslation();
+  const lines = order.lines.filter((l) => l.status !== 'VOIDED');
   return (
     <Pressable
       onPress={onPress}
@@ -24,14 +20,14 @@ export function OrderRow({ order, onPress }: { order: Order; onPress?: () => voi
     >
       <View className="flex-1">
         <View className="flex-row items-center gap-2">
-          <Text className="text-base font-bold text-fg">{order.tableName ?? order.customerName}</Text>
-          <StatusChip status={toChip(order.status)} />
+          <Text className="text-base font-bold text-fg">{order.tableName ?? order.customerName ?? order.code}</Text>
+          <StatusChip status={orderTone[order.status]} label={t(orderLabelKey[order.status])} />
         </View>
         <Text className="mt-1 text-xs text-muted">
-          {order.code} · {order.items.length} món · {formatTime(order.updatedAt)}
+          {order.code} · {t('common.items', { count: lines.length })} · {formatTime(order.updatedAt)}
         </Text>
       </View>
-      <Text className="mr-2 text-base font-extrabold text-brand">{formatMoney(order.total)}</Text>
+      <Text className="mr-2 text-base font-extrabold text-brand">{formatMoney(calcSubtotal(lines))}</Text>
       <ChevronRight size={18} color={color.text.muted} />
     </Pressable>
   );

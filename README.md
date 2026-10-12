@@ -1,56 +1,44 @@
-# Welcome to your Expo app 👋
+# Kopag POS — Waiter app (Expo)
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+App gọi món cầm tay cho phục vụ / thu ngân, chạy trên **Sunmi V2s** (Android) có máy in nhiệt tích hợp.
 
-## Get started
+- Plan & contract dùng chung (nguồn sự thật): `../../docs/pos/pos-plan.md`
+- Đề xuất API gửi team BE: `../../docs/pos/pos-be-api-request.md`
+- In hoá đơn Sunmi: [`docs/sprint3-printing-sunmi.md`](docs/sprint3-printing-sunmi.md)
 
-1. Install dependencies
+## Chạy
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+Package manager: **bun** (`bun.lock`). Không dùng npm/yarn.
 
 ```bash
-npm run reset-project
+bun install
+bunx expo start                 # dev (Expo Go / dev client)
+bunx expo run:android           # build native + cài lên máy (cần cho module sunmi-printer)
+bunx tsc --noEmit -p .          # typecheck
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Mặc định chạy với **mock API** (`EXPO_PUBLIC_API_MODE=mock`) — mock đóng vai server theo contract (idempotency, version, server tính tiền, thanh toán). PIN thử: `111111` phục vụ, `222222` thu ngân, `999999` quản lý (dùng để duyệt).
 
-### Other setup steps
+### Chế độ GraphQL (BE passiontech)
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+Copy `.env.example` → `.env.local`, đặt `EXPO_PUBLIC_API_MODE=graphql` và điền URL router, tenant, chi nhánh.
 
-## Learn more
+| Phần | Nguồn |
+|---|---|
+| Menu (danh mục + món), thông tin chi nhánh | **BE thật** — `categoryServiceAllCategories`, `productServiceSearchProducts`, `entityServiceBranchById` |
+| PIN, bàn, đơn, bếp, bill, thanh toán | **Mock** — BE chưa có (xem `docs/pos/pos-be-api-request.md`) |
 
-To learn more about developing your project with Expo, look at the following resources:
+Vì PIN vẫn là mock, gọi BE cần `EXPO_PUBLIC_DEV_ACCESS_TOKEN` (token từ REST portal login + select-tenant) — **chỉ dùng khi dev**, không đặt khi build phát hành. Ánh xạ BE → contract ở `src/data/api/graphql.ts`: giá Float làm tròn tới đồng, product nhiều variant → nhóm "Loại" bắt buộc chọn 1, chỉ nhận món VND.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Cấu trúc
 
-## Join the community
+| Thư mục | Nội dung |
+|---|---|
+| `src/app/` | Màn hình (expo-router) |
+| `src/data/` | `types.ts` (contract), `api/PosApi.ts` (interface), `api/mock.ts`, `queries/` (TanStack Query), `offline.ts` |
+| `src/domain/` | Tính tiền, chia bill, modifier — dùng chung cho mock và xem trước ở client |
+| `src/store/` | Zustand: phiên đăng nhập, giỏ, đơn đang mở, phiên thanh toán, hàng đợi offline |
+| `src/native/` | Máy in Sunmi, hoá đơn, thông báo |
+| `modules/sunmi-printer/` | Local Expo module (Kotlin) cho máy in Sunmi |
 
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+UI chỉ gọi hook trong `src/data/queries` → `PosApi`. Đổi sang BE thật = thêm impl GraphQL cho `PosApi`, không sửa màn hình.

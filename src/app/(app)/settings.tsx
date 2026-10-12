@@ -4,26 +4,29 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollView, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, ChevronRight, LogOut, Printer, ReceiptText } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, LogOut, Printer, ReceiptText, Wallet } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
+import { useCurrentShift } from '@/data/queries';
 import i18n from '@/lib/i18n';
 import { getPrinterStatus, isPrinterSupported, testPrint } from '@/native/printer';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/store/auth-store';
+import { needsActivation, useTerminalStore } from '@/store/terminal-store';
 import { useSettingsStore } from '@/store/settings-store';
 
-const STATUS_LABEL: Record<string, string> = {
-  ready: 'Sẵn sàng',
-  preparing: 'Đang chuẩn bị',
-  out_of_paper: 'Hết giấy',
-  overheated: 'Quá nhiệt',
-  cover_open: 'Mở nắp',
-  comm_error: 'Lỗi giao tiếp',
-  disconnected: 'Chưa kết nối',
-  unsupported: 'Không có máy in Sunmi',
-  unknown: 'Không rõ',
+// Trạng thái máy in → i18n key (printer.status.*).
+const STATUS_LABEL_KEY: Record<string, string> = {
+  ready: 'printer.status.ready',
+  preparing: 'printer.status.preparing',
+  out_of_paper: 'printer.status.out_of_paper',
+  overheated: 'printer.status.overheated',
+  cover_open: 'printer.status.cover_open',
+  comm_error: 'printer.status.comm_error',
+  disconnected: 'printer.status.disconnected',
+  unsupported: 'printer.status.unsupported',
+  unknown: 'printer.status.unknown',
 };
 
 export default function Settings() {
@@ -31,6 +34,9 @@ export default function Settings() {
   const router = useRouter();
   const s = useSettingsStore();
   const logout = useAuthStore((st) => st.logout);
+  const terminal = useTerminalStore((st) => st.session);
+  const deactivate = useTerminalStore((st) => st.deactivate);
+  const shift = useCurrentShift();
 
   const [status, setStatus] = useState('unknown');
   const [printing, setPrinting] = useState(false);
@@ -46,9 +52,9 @@ export default function Settings() {
     const res = await testPrint();
     setPrinting(false);
     refreshStatus();
-    if (res.printed) toast.success('Đã in thử', 'Kiểm tra giấy ra');
-    else if (res.reason === 'unsupported') toast.info('Không có máy in Sunmi', 'Chạy trên Sunmi V2s');
-    else toast.error('In thử lỗi', STATUS_LABEL[status] ?? '');
+    if (res.printed) toast.success(t('printer.testPrinted'), t('printer.checkPaper'));
+    else if (res.reason === 'unsupported') toast.info(t('printer.noSunmi'), t('printer.runOnSunmi'));
+    else toast.error(t('printer.testError'), STATUS_LABEL_KEY[status] ? t(STATUS_LABEL_KEY[status]) : '');
   };
 
   const setLang = (lng: 'vi' | 'en') => {
@@ -69,38 +75,65 @@ export default function Settings() {
         {/* Lịch sử */}
         <Pressable onPress={() => router.push('/(app)/history')} className="flex-row items-center rounded-2xl border border-line bg-surface px-4 py-4 active:opacity-80">
           <ReceiptText size={20} color={color.brand.DEFAULT} />
-          <Text className="ml-3 flex-1 font-semibold text-fg">Lịch sử hoá đơn</Text>
+          <Text className="ml-3 flex-1 font-semibold text-fg">{t('settings.billHistory')}</Text>
+          <ChevronRight size={18} color={color.text.muted} />
+        </Pressable>
+
+        {/* Ca làm việc (pos-plan 3.7) */}
+        <Pressable onPress={() => router.push('/(app)/shift')} className="flex-row items-center rounded-2xl border border-line bg-surface px-4 py-4 active:opacity-80">
+          <Wallet size={20} color={color.brand.DEFAULT} />
+          <Text className="ml-3 flex-1 font-semibold text-fg">{t('shift.title')}</Text>
+          <Text className={`mr-2 text-sm ${shift.data ? 'text-available' : 'text-pending'}`}>
+            {shift.isLoading ? '…' : shift.data ? t('shift.statusOpen', { number: shift.data.number }) : t('shift.noShift')}
+          </Text>
           <ChevronRight size={18} color={color.text.muted} />
         </Pressable>
 
         {/* Máy in */}
-        <Section title="Máy in (Sunmi)">
+        <Section title={t('settings.printer')}>
           <View className="flex-row items-center justify-between">
             <View className="flex-row items-center">
               <Printer size={20} color={supported ? color.brand.DEFAULT : color.text.muted} />
-              <Text className="ml-3 font-semibold text-fg">Trạng thái</Text>
+              <Text className="ml-3 font-semibold text-fg">{t('settings.status')}</Text>
             </View>
             <Text className={supported && status === 'ready' ? 'text-available' : 'text-muted'}>
-              {STATUS_LABEL[status] ?? status}
+              {STATUS_LABEL_KEY[status] ? t(STATUS_LABEL_KEY[status]) : status}
             </Text>
           </View>
           <Button
             className="mt-3"
             variant="ghost"
-            label="In thử"
+            label={t('settings.testPrint')}
             loading={printing}
             onPress={onTestPrint}
             leftIcon={<Printer size={18} color={color.text.primary} />}
           />
           {!supported && (
             <Text className="mt-2 text-xs text-muted">
-              Chỉ in được khi chạy trên máy Sunmi V2s (dev build sau prebuild).
+              {t('settings.sunmiOnly')}
             </Text>
           )}
         </Section>
 
         {/* Ngôn ngữ */}
-        <Section title="Ngôn ngữ">
+        {needsActivation && terminal ? (
+          <Section title={t('terminal.section')}>
+            <Text className="text-muted">
+              {t('terminal.activatedBy')}: <Text className="text-fg">{terminal.email}</Text>
+            </Text>
+            <Text className="text-muted">
+              {t('terminal.branch')}: <Text className="text-fg">{terminal.branchName ?? '—'}</Text>
+            </Text>
+            <Button
+              variant="ghost"
+              className="mt-2"
+              label={t('terminal.deactivate')}
+              onPress={() => logout().then(deactivate).then(() => router.replace('/(auth)/activate'))}
+            />
+          </Section>
+        ) : null}
+
+        <Section title={t('settings.language')}>
           <View className="flex-row rounded-2xl bg-elevated p-1">
             {(['vi', 'en'] as const).map((lng) => (
               <Pressable key={lng} onPress={() => setLang(lng)} className={`flex-1 items-center rounded-xl py-2.5 ${s.language === lng ? 'bg-brand' : ''}`}>
@@ -113,15 +146,15 @@ export default function Settings() {
         </Section>
 
         {/* Toggle */}
-        <Section title="Tuỳ chọn">
-          <ToggleRow label="Âm thanh" value={s.soundEnabled} onValueChange={s.toggleSound} />
-          <ToggleRow label="Rung (haptics)" value={s.hapticsEnabled} onValueChange={s.toggleHaptics} />
-          <ToggleRow label="Phí phục vụ 5%" value={s.serviceCharge} onValueChange={s.toggleServiceCharge} />
+        <Section title={t('settings.options')}>
+          <ToggleRow label={t('settings.sound')} value={s.soundEnabled} onValueChange={s.toggleSound} />
+          <ToggleRow label={t('settings.haptics')} value={s.hapticsEnabled} onValueChange={s.toggleHaptics} />
+          <ToggleRow label={t('settings.serviceCharge')} value={s.serviceCharge} onValueChange={s.toggleServiceCharge} />
         </Section>
 
         <Button
           variant="ghost"
-          label="Đăng xuất"
+          label={t('settings.logout')}
           leftIcon={<LogOut size={18} color={color.status.cancelled} />}
           onPress={() => logout().then(() => router.replace('/(auth)/pin-login'))}
         />

@@ -1,44 +1,77 @@
-// src/domain/pricing.ts — MỌI surface tính tiền qua đây (Mục 3.4). KHÔNG hardcode thuế/phí nơi khác.
-import type { OrderLine, Voucher } from '@/data/types';
+// src/domain/pricing.ts — công thức tính tiền (pos-plan Mục 3.4). Server là nơi tính chuẩn (D7);
+// bản này dùng cho mock và cho client XEM TRƯỚC — phải ra cùng kết quả với cùng input.
+import type { BranchSettings, DiscountType, LineStatus, Money } from '@/data/types';
 
-export const TAX_RATE = 0.1; // VAT 10% (điều chỉnh theo cấu hình quán)
-export const SERVICE_RATE = 0.05; // phí phục vụ (nếu bật)
-
-export function calcSubtotal(lines: OrderLine[]): number {
-  return lines.reduce((sum, l) => sum + l.price * l.quantity, 0);
-}
-
-export function calcTax(subtotal: number): number {
-  return Math.round(subtotal * TAX_RATE);
-}
-
-export function calcServiceCharge(subtotal: number): number {
-  return Math.round(subtotal * SERVICE_RATE);
-}
-
-function voucherDiscount(subtotal: number, voucher?: Voucher): number {
-  if (!voucher) return 0;
-  if (voucher.type === 'percent') return Math.round((subtotal * voucher.value) / 100);
-  return Math.min(voucher.value, subtotal);
-}
-
-export type PriceBreakdown = {
-  subtotal: number;
-  tax: number;
-  service: number;
-  discount: number;
-  total: number;
+export type PricingLine = {
+  unitPrice: Money;
+  quantity: number;
+  modifiers?: { priceDelta: Money }[];
+  status?: LineStatus;
 };
 
-export function calcTotal(
-  lines: OrderLine[],
-  opts?: { discount?: number; tip?: number; voucher?: Voucher; service?: boolean }
+export type DiscountRule = { type: DiscountType; value: number };
+
+export type PricingAdjustments = {
+  discounts?: DiscountRule[];
+  serviceCharge?: boolean;
+  tip?: Money;
+};
+
+export type PriceBreakdown = {
+  subtotal: Money;
+  discountAmounts: Money[]; // cùng thứ tự với adjustments.discounts
+  discountTotal: Money;
+  serviceCharge: Money;
+  taxable: Money;
+  tax: Money;
+  tip: Money;
+  total: Money;
+};
+
+export function lineUnitPrice(l: PricingLine): Money {
+  return l.unitPrice + (l.modifiers ?? []).reduce((s, m) => s + m.priceDelta, 0);
+}
+
+export function lineTotal(l: PricingLine): Money {
+  return lineUnitPrice(l) * l.quantity;
+}
+
+export function calcSubtotal(lines: PricingLine[]): Money {
+  return lines.filter((l) => l.status !== 'VOIDED').reduce((s, l) => s + lineTotal(l), 0);
+}
+
+/** Giảm giá tính trên subtotal; tổng giảm không vượt subtotal (cắt dần từ khoản sau). */
+function discountAmounts(subtotal: Money, rules: DiscountRule[]): Money[] {
+  let left = subtotal;
+  return rules.map((r) => {
+    const raw = r.type === 'PERCENT' ? Math.round((subtotal * r.value) / 100) : r.value;
+    const amt = Math.max(0, Math.min(raw, left));
+    left -= amt;
+    return amt;
+  });
+}
+
+export function calcBill(
+  lines: PricingLine[],
+  settings: BranchSettings,
+  adj: PricingAdjustments = {}
 ): PriceBreakdown {
   const subtotal = calcSubtotal(lines);
-  const tax = calcTax(subtotal);
-  const service = opts?.service ? calcServiceCharge(subtotal) : 0;
-  const discount = (opts?.discount ?? 0) + voucherDiscount(subtotal, opts?.voucher);
-  const tip = opts?.tip ?? 0;
-  const total = Math.max(0, subtotal + tax + service + tip - discount);
-  return { subtotal, tax, service, discount, total };
+  const amounts = discountAmounts(subtotal, adj.discounts ?? []);
+  const discountTotal = amounts.reduce((s, a) => s + a, 0);
+  const serviceCharge = adj.serviceCharge
+    ? Math.round(settings.serviceChargeRate * (subtotal - discountTotal))
+    : 0;
+  const taxable = subtotal - discountTotal + serviceCharge;
+  const tax = settings.pricesIncludeTax
+    ? taxable - Math.round(taxable / (1 + settings.taxRate))
+    : Math.round(taxable * settings.taxRate);
+  const tip = Math.max(0, adj.tip ?? 0);
+  const total = taxable + (settings.pricesIncludeTax ? 0 : tax) + tip;
+  return { subtotal, discountAmounts: amounts, discountTotal, serviceCharge, taxable, tax, tip, total };
+}
+
+/** Nhãn thuế hiển thị/in, vd "VAT 10%" — luôn lấy từ settings, không hardcode. */
+export function taxLabel(taxRate: number): string {
+  return `VAT ${Math.round(taxRate * 1000) / 10}%`;
 }

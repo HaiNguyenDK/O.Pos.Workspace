@@ -1,6 +1,7 @@
 // Màn 4 — thực đơn: grid 2 cột, category tabs ngang, quick add, modifier sheet.
 import { useRouter } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft, ShoppingCart } from 'lucide-react-native';
@@ -10,6 +11,8 @@ import { ModifierSheet, type ModifierSheetHandle } from '@/components/sheets/mod
 import { ErrorState } from '@/components/ui/error-state';
 import { useMenu } from '@/data/queries';
 import { color } from '@/lib/theme';
+import { needsModifierChoice } from '@/domain/modifiers';
+import { calcSubtotal } from '@/domain/pricing';
 import { formatMoney } from '@/lib/format';
 import { haptics } from '@/lib/haptics';
 import { toast } from '@/lib/toast';
@@ -18,6 +21,7 @@ import { useOrderStore } from '@/store/order-store';
 import type { MenuItem } from '@/data/types';
 
 export default function Menu() {
+  const { t } = useTranslation();
   const router = useRouter();
   const menu = useMenu();
   const modifier = useRef<ModifierSheetHandle>(null);
@@ -25,7 +29,7 @@ export default function Menu() {
   const active = useOrderStore((s) => s.active);
   const lines = useCartStore((s) => s.lines);
   const addItem = useCartStore((s) => s.addItem);
-  const totals = useCartStore((s) => s.totals);
+  const cartSubtotal = calcSubtotal(lines);
 
   const [cat, setCat] = useState<string>('all');
   const items = useMemo(() => {
@@ -36,13 +40,15 @@ export default function Menu() {
   const cartCount = lines.reduce((n, l) => n + l.quantity, 0);
   const qtyOf = (id: string) => lines.filter((l) => l.menuItemId === id).reduce((n, l) => n + l.quantity, 0);
 
+  // Món có nhóm bắt buộc (vd size) → mở sheet chọn thay vì thêm nhanh.
   const quickAdd = (item: MenuItem) => {
+    if (needsModifierChoice(item)) return modifier.current?.present(item);
     haptics.light();
     addItem(item, 1);
-    toast.success('Đã thêm', item.name);
+    toast.success(t('menu.added'), item.name);
   };
 
-  const categories = [{ id: 'all', name: 'Tất cả' }, ...(menu.data?.categories ?? [])];
+  const categories = [{ id: 'all', name: t('common.all') }, ...(menu.data?.categories ?? [])];
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0B0C' }} edges={['top']}>
@@ -52,10 +58,10 @@ export default function Menu() {
           <ChevronLeft size={22} color={color.text.primary} />
         </Pressable>
         <View className="flex-1">
-          <Text className="text-xl font-extrabold text-fg">Thực đơn</Text>
+          <Text className="text-xl font-extrabold text-fg">{t('menu.title')}</Text>
           {!!active && (
             <Text className="text-xs text-muted">
-              {active.tableName ?? 'Mang về'} · {active.customerName}
+              {active.tableName ?? t('common.takeaway')} · {active.customerName}
             </Text>
           )}
         </View>
@@ -112,17 +118,17 @@ export default function Menu() {
           >
             <View className="flex-row items-center">
               <ShoppingCart size={20} color="#fff" />
-              <Text className="ml-2 font-bold text-white">{cartCount} món trong giỏ</Text>
+              <Text className="ml-2 font-bold text-white">{t('menu.cartCount', { count: cartCount })}</Text>
             </View>
-            <Text className="font-extrabold text-white">{formatMoney(totals().total)}</Text>
+            <Text className="font-extrabold text-white">{formatMoney(cartSubtotal)}</Text>
           </Pressable>
         </View>
       )}
 
-      <ModifierSheet ref={modifier} onAdd={(item, qty, note) => {
+      <ModifierSheet ref={modifier} onAdd={(item, qty, note, modifiers) => {
         haptics.light();
-        addItem(item, qty, note);
-        toast.success('Đã thêm', `${item.name} ×${qty}`);
+        addItem(item, qty, note, modifiers);
+        toast.success(t('menu.added'), t('menu.addedQty', { name: item.name, qty }));
       }} />
     </SafeAreaView>
   );

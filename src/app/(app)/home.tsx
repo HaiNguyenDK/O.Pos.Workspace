@@ -4,16 +4,17 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, FlatList, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Bell, ScanLine, Settings as SettingsIcon } from 'lucide-react-native';
+import { Bell, ScanLine, Settings as SettingsIcon, Wallet } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
 import { TableCard } from '@/components/ui/table-card';
 import { OrderRow } from '@/components/ui/order-row';
 import { ErrorState } from '@/components/ui/error-state';
-import { useRunningOrders, useTables } from '@/data/queries';
+import { useCurrentShift, useRunningOrders, useTables } from '@/data/queries';
 import { color } from '@/lib/theme';
 import { useNotifications } from '@/data/queries';
 
 type Tab = 'tables' | 'orders';
+const ALL_ZONES = '__all__';
 
 export default function Home() {
   const { t } = useTranslation();
@@ -24,13 +25,14 @@ export default function Home() {
   const orders = useRunningOrders();
   const notifications = useNotifications();
   const unread = notifications.data?.filter((n) => !n.read).length ?? 0;
+  const shift = useCurrentShift();
 
   const zones = useMemo(() => {
     const z = new Set((tables.data ?? []).map((t) => t.zone));
-    return ['Tất cả', ...z];
+    return [ALL_ZONES, ...z];
   }, [tables.data]);
-  const [zone, setZone] = useState('Tất cả');
-  const filteredTables = (tables.data ?? []).filter((tb) => zone === 'Tất cả' || tb.zone === zone);
+  const [zone, setZone] = useState(ALL_ZONES);
+  const filteredTables = (tables.data ?? []).filter((tb) => zone === ALL_ZONES || tb.zone === zone);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0B0C' }} edges={['top']}>
@@ -40,6 +42,17 @@ export default function Home() {
           {t('appName')} <Text className="text-brand">POS</Text>
         </Text>
         <View className="flex-row items-center gap-2">
+          {/* Ca thu ngân (pos-plan 3.7): chấm xanh = đang mở ca, vàng = chưa mở. */}
+          <Pressable
+            onPress={() => router.push('/(app)/shift')}
+            accessibilityLabel={shift.data ? t('shift.statusOpen', { number: shift.data.number }) : t('shift.noShift')}
+            className="h-11 w-11 items-center justify-center rounded-full bg-surface active:opacity-70"
+          >
+            <Wallet size={20} color={color.text.primary} />
+            {!shift.isLoading && (
+              <View className={`absolute right-2 top-2 h-2.5 w-2.5 rounded-full ${shift.data ? 'bg-available' : 'bg-pending'}`} />
+            )}
+          </Pressable>
           <Pressable
             onPress={() => router.push('/(app)/scan')}
             className="h-11 w-11 items-center justify-center rounded-full bg-surface active:opacity-70"
@@ -95,7 +108,7 @@ export default function Home() {
                 className={`h-9 justify-center rounded-full px-4 ${zone === item ? 'bg-elevated border border-brand' : 'bg-surface'}`}
               >
                 <Text className={zone === item ? 'font-semibold text-brand' : 'text-muted'}>
-                  {item}
+                  {item === ALL_ZONES ? t('common.all') : item}
                 </Text>
               </Pressable>
             )}

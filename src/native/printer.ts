@@ -1,7 +1,7 @@
 // src/native/printer.ts — in hoá đơn qua máy in tích hợp Sunmi (V2s). Sprint 3 (D2 chốt: Sunmi).
 // Trên máy KHÔNG phải Sunmi (hoặc dev build chưa có native module) → fallback stub, app vẫn chạy.
-import { formatReceipt, type ShopInfo } from '@/native/receipt';
-import type { Bill } from '@/data/types';
+import { formatReceipt, formatShiftReport, type ShopInfo } from '@/native/receipt';
+import type { Bill, ShiftReport } from '@/data/types';
 
 // requireNativeModule (trong module) sẽ throw nếu binary chưa build module → bọc require để fallback.
 declare const require: (id: string) => any;
@@ -57,20 +57,30 @@ async function ensureConnected(): Promise<boolean> {
   }
 }
 
-export async function printReceipt(bill: Bill, shop?: ShopInfo): Promise<PrintResult> {
+/** In một khối text đã format (58mm) + đẩy giấy. */
+async function printBlock(text: string, label: string): Promise<PrintResult> {
   if (!isPrinterSupported()) {
-    console.log('[printer] không phải máy Sunmi — bỏ in', bill.code);
+    console.log('[printer] không phải máy Sunmi — bỏ in', label);
     return { printed: false, reason: 'unsupported' };
   }
   if (!(await ensureConnected())) return { printed: false, reason: 'not_connected' };
   try {
-    await Sunmi!.printText(formatReceipt(bill, shop));
+    await Sunmi!.printText(text);
     await Sunmi!.lineWrap(3);
     return { printed: true };
   } catch (e) {
     console.warn('[printer] in lỗi', e);
     return { printed: false, reason: 'error' };
   }
+}
+
+export function printReceipt(bill: Bill, shop?: ShopInfo): Promise<PrintResult> {
+  return printBlock(formatReceipt(bill, shop), bill.code);
+}
+
+/** In báo cáo X/Z ca thu ngân (pos-plan Mục 3.7). */
+export function printShiftReport(report: ShiftReport, shop?: ShopInfo, opts?: { showCash?: boolean }): Promise<PrintResult> {
+  return printBlock(formatShiftReport(report, shop, opts), `${report.kind} ca #${report.shift.number}`);
 }
 
 export async function testPrint(): Promise<PrintResult> {

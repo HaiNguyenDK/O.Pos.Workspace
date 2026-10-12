@@ -16,6 +16,7 @@ import { toastConfig } from '@/lib/toast';
 import { navTheme } from '@/lib/theme';
 import { setupOnlineManager } from '@/lib/connectivity';
 import { useAuthStore } from '@/store/auth-store';
+import { useTerminalStore } from '@/store/terminal-store';
 
 SplashScreen.preventAutoHideAsync();
 setupOnlineManager();
@@ -26,11 +27,15 @@ const queryClient = new QueryClient({
 
 export default function RootLayout() {
   const hydrate = useAuthStore((s) => s.hydrate);
-  const hydrated = useAuthStore((s) => s.hydrated);
+  const authHydrated = useAuthStore((s) => s.hydrated);
+  const hydrateTerminal = useTerminalStore((s) => s.hydrate);
+  const terminalHydrated = useTerminalStore((s) => s.hydrated);
+  const hydrated = authHydrated && terminalHydrated;
 
   useEffect(() => {
     hydrate();
-  }, [hydrate]);
+    hydrateTerminal();
+  }, [hydrate, hydrateTerminal]);
 
   // Ẩn splash khi hydrate xong; fallback 2.5s để KHÔNG BAO GIỜ kẹt splash.
   useEffect(() => {

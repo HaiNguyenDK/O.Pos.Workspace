@@ -1,6 +1,6 @@
 // Màn 3 — mở/tiếp tục đơn tại bàn. Form: tên khách, số người, mode, note. TextInput + +/- guests.
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, KeyboardAvoidingView, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -8,12 +8,14 @@ import { ChevronLeft, Minus, Plus } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
 import { TextField } from '@/components/ui/text-field';
-import { useCreateOrder, useRunningOrder, useTables } from '@/data/queries';
+import { useOpenOrder, useRunningOrder, useTables } from '@/data/queries';
+import { useActionKey } from '@/lib/use-action-key';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
+import { useBillStore } from '@/store/bill-store';
 import { useCartStore } from '@/store/cart-store';
 import { useOrderStore } from '@/store/order-store';
-import type { ServiceMode } from '@/data/types';
+import { isPosApiError, type Order, type ServiceMode } from '@/data/types';
 
 export default function TableDetail() {
   const { t } = useTranslation();
@@ -24,59 +26,57 @@ export default function TableDetail() {
   const table = useMemo(() => tables.data?.find((tb) => tb.id === id), [tables.data, id]);
   const running = useRunningOrder(id);
 
-  const createOrder = useCreateOrder();
+  const openOrder = useOpenOrder();
+  const action = useActionKey();
   const setActive = useOrderStore((s) => s.setActive);
   const clearCart = useCartStore((s) => s.clear);
+  const resetBill = useBillStore((s) => s.reset);
 
   const [customerName, setCustomerName] = useState('');
   const [guests, setGuests] = useState(2);
-  const [mode, setMode] = useState<ServiceMode>('dine-in');
+  const [mode, setMode] = useState<ServiceMode>('DINE_IN');
   const [note, setNote] = useState('');
+
+  const enter = useCallback(
+    (o: Pick<Order, 'id' | 'tableId' | 'tableName' | 'customerName' | 'mode'>, to: '/(app)/cart' | '/(app)/menu') => {
+      setActive({ orderId: o.id, tableId: o.tableId, tableName: o.tableName, customerName: o.customerName, mode: o.mode });
+      clearCart();
+      resetBill();
+      router.replace(to);
+    },
+    [setActive, clearCart, resetBill, router]
+  );
 
   // Có đơn đang chạy tại bàn → tiếp tục luôn (không hiện form).
   useEffect(() => {
-    if (running.data) {
-      const o = running.data;
-      setActive(
-        {
-          orderId: o.id,
-          tableId: o.tableId,
-          tableName: o.tableName,
-          customerName: o.customerName,
-          mode: o.mode,
-        },
-        o.items
-      );
-      clearCart();
-      router.replace('/(app)/cart');
-    }
-  }, [running.data, setActive, clearCart, router]);
+    if (running.data) enter(running.data, '/(app)/cart');
+  }, [running.data, enter]);
 
   const submit = () => {
-    createOrder.mutate(
+    openOrder.mutate(
       {
+        idempotencyKey: action.key(),
         tableId: id,
-        customerName: customerName.trim() || `Khách ${table?.name ?? ''}`.trim(),
+        customerName: customerName.trim() || t('table.defaultCustomer', { name: table?.name ?? '' }).trim(),
         guests,
         mode,
         note: note.trim() || undefined,
       },
       {
         onSuccess: (order) => {
-          setActive(
-            {
-              orderId: order.id,
-              tableId: order.tableId,
-              tableName: order.tableName,
-              customerName: order.customerName,
-              mode: order.mode,
-            },
-            []
-          );
-          clearCart();
-          router.replace('/(app)/menu');
+          action.reset();
+          enter(order, '/(app)/menu');
         },
-        onError: (e) => toast.error(t('common.error'), (e as Error).message),
+        onError: (e) => {
+          action.settle(e);
+          // Máy khác vừa mở đơn cho bàn này → vào luôn đơn đó.
+          if (isPosApiError(e) && e.code === 'TABLE_OCCUPIED') {
+            toast.info(t('table.alreadyOpen'), t('table.alreadyOpenHint'));
+            running.refetch();
+            return;
+          }
+          toast.error(t('common.error'), (e as Error).message);
+        },
       }
     );
   };
@@ -97,7 +97,7 @@ export default function TableDetail() {
           <Pressable onPress={() => router.back()} className="mr-2 h-10 w-10 items-center justify-center rounded-full bg-surface active:opacity-70">
             <ChevronLeft size={22} color={color.text.primary} />
           </Pressable>
-          <Text className="text-xl font-extrabold text-fg">Mở đơn · {table?.name ?? id}</Text>
+          <Text className="text-xl font-extrabold text-fg">{t('table.openTitle', { name: table?.name ?? id })}</Text>
         </View>
 
         <ScrollView
@@ -108,18 +108,18 @@ export default function TableDetail() {
         >
           {/* Tên khách */}
           <View>
-            <Text className="mb-2 font-semibold text-muted">Tên khách</Text>
+            <Text className="mb-2 font-semibold text-muted">{t('table.customerName')}</Text>
             <TextField
               value={customerName}
               onChangeText={setCustomerName}
-              placeholder={`Khách ${table?.name ?? ''}`.trim()}
+              placeholder={t('table.defaultCustomer', { name: table?.name ?? '' }).trim()}
               returnKeyType="next"
             />
           </View>
 
           {/* Số người */}
           <View>
-            <Text className="mb-2 font-semibold text-muted">Số người</Text>
+            <Text className="mb-2 font-semibold text-muted">{t('table.guests')}</Text>
             <View className="flex-row items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3">
               <Stepper onPress={() => setGuests((g) => Math.max(1, g - 1))} icon={<Minus size={20} color={color.text.primary} />} />
               <Text className="text-2xl font-extrabold text-fg">{guests}</Text>
@@ -129,16 +129,16 @@ export default function TableDetail() {
 
           {/* Mode */}
           <View>
-            <Text className="mb-2 font-semibold text-muted">Hình thức</Text>
+            <Text className="mb-2 font-semibold text-muted">{t('table.mode')}</Text>
             <View className="flex-row rounded-2xl bg-surface p-1">
-              {(['dine-in', 'take-away'] as ServiceMode[]).map((m) => (
+              {(['DINE_IN', 'TAKE_AWAY'] as ServiceMode[]).map((m) => (
                 <Pressable
                   key={m}
                   onPress={() => setMode(m)}
                   className={`flex-1 items-center rounded-xl py-3 ${mode === m ? 'bg-brand' : ''}`}
                 >
                   <Text className={`font-bold ${mode === m ? 'text-white' : 'text-muted'}`}>
-                    {m === 'dine-in' ? 'Tại bàn' : 'Mang về'}
+                    {m === 'DINE_IN' ? t('common.dineIn') : t('common.takeaway')}
                   </Text>
                 </Pressable>
               ))}
@@ -147,18 +147,18 @@ export default function TableDetail() {
 
           {/* Note */}
           <View>
-            <Text className="mb-2 font-semibold text-muted">Ghi chú</Text>
+            <Text className="mb-2 font-semibold text-muted">{t('common.note')}</Text>
             <TextField
               value={note}
               onChangeText={setNote}
-              placeholder="VD: khách quen, bàn gần cửa sổ…"
+              placeholder={t('table.notePlaceholder')}
               multiline
             />
           </View>
         </ScrollView>
 
         <View className="border-t border-line px-4 py-4">
-          <Button label="Mở đơn & chọn món" onPress={submit} loading={createOrder.isPending} />
+          <Button label={t('table.submit')} onPress={submit} loading={openOrder.isPending} />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

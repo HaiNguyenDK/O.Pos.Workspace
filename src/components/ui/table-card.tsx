@@ -2,11 +2,12 @@
 import { Users } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
 import { StatusChip } from '@/components/ui/status-chip';
+import { tableTone } from '@/lib/status';
 import { color } from '@/lib/theme';
 import type { DiningTable } from '@/data/types';
 
 export function TableCard({ table, onPress }: { table: DiningTable; onPress?: () => void }) {
-  const accent = color.status[table.status];
+  const accent = color.status[tableTone[table.status]];
   return (
     <Pressable
       onPress={onPress}
@@ -20,7 +21,7 @@ export function TableCard({ table, onPress }: { table: DiningTable; onPress?: ()
           <Text className="ml-1 text-xs text-muted">{table.seats}</Text>
         </View>
       </View>
-      <StatusChip status={table.status} />
+      <StatusChip status={tableTone[table.status]} />
       <Text className="mt-2 text-xs text-muted">{table.zone}</Text>
     </Pressable>
   );

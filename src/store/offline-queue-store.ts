@@ -1,22 +1,25 @@
 // src/store/offline-queue-store.ts — hàng đợi "gửi bếp" khi mất mạng (persist AsyncStorage).
-// Mất mạng → enqueue; có mạng lại → flush (data/offline.ts). Không làm conflict resolution ở v1.
+// Chỉ addLines được xếp hàng (pos-plan Mục 5). Mỗi mục giữ nguyên idempotencyKey + lineId để
+// gửi lại bao nhiêu lần cũng không tạo món trùng. Lỗi nghiệp vụ → đánh dấu `error`, không tự thử lại.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { OrderLine } from '@/data/types';
+import type { CartLine } from '@/store/cart-store';
 
 export type QueuedSend = {
-  id: string;
+  idempotencyKey: string;
   orderId: string;
   tableName?: string;
-  lines: OrderLine[];
+  lines: CartLine[];
   createdAt: string; // ISO
+  error?: string; // lỗi nghiệp vụ khi flush — cần waiter xử lý
 };
 
 type QueueState = {
   queue: QueuedSend[];
-  enqueue: (item: Omit<QueuedSend, 'id' | 'createdAt'>) => void;
-  remove: (id: string) => void;
+  enqueue: (item: Omit<QueuedSend, 'createdAt' | 'error'>) => void;
+  remove: (idempotencyKey: string) => void;
+  markFailed: (idempotencyKey: string, error: string) => void;
   clear: () => void;
 };
 
@@ -24,16 +27,12 @@ export const useOfflineQueueStore = create<QueueState>()(
   persist(
     (set) => ({
       queue: [],
-      enqueue: (item) =>
-        set((s) => ({
-          queue: [
-            ...s.queue,
-            { ...item, id: `q${Date.now()}${Math.floor(Math.random() * 1000)}`, createdAt: new Date().toISOString() },
-          ],
-        })),
-      remove: (id) => set((s) => ({ queue: s.queue.filter((q) => q.id !== id) })),
+      enqueue: (item) => set((s) => ({ queue: [...s.queue, { ...item, createdAt: new Date().toISOString() }] })),
+      remove: (key) => set((s) => ({ queue: s.queue.filter((q) => q.idempotencyKey !== key) })),
+      markFailed: (key, error) =>
+        set((s) => ({ queue: s.queue.map((q) => (q.idempotencyKey === key ? { ...q, error } : q)) })),
       clear: () => set({ queue: [] }),
     }),
-    { name: 'pos.offline.queue', storage: createJSONStorage(() => AsyncStorage) }
+    { name: 'pos.offline.queue.v2', storage: createJSONStorage(() => AsyncStorage) }
   )
 );

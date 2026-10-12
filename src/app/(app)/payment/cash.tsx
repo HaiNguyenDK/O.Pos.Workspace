@@ -1,49 +1,57 @@
 // Màn 9 — tiền mặt: nhập tiền khách đưa, tính thối, gợi ý mệnh giá. NumericKeypad.
+// Số cần thu lấy từ Bill server; startPayment(CASH) — server ghi nhận và trả tiền thối.
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Check, ChevronLeft } from 'lucide-react-native';
 import { Pressable, Text, View } from '@/tw';
 import { Button } from '@/components/ui/button';
 import { NumericKeypad } from '@/components/ui/numeric-keypad';
-import { usePay } from '@/data/queries';
-import { calcTotal } from '@/domain/pricing';
+import { useBill, useStartPayment } from '@/data/queries';
 import { cashSuggestions } from '@/lib/billing';
 import { formatMoney } from '@/lib/format';
 import { haptics } from '@/lib/haptics';
+import { newId } from '@/lib/id';
+import { handleShiftRequired } from '@/lib/shift';
 import { color } from '@/lib/theme';
 import { toast } from '@/lib/toast';
+import { useActionKey } from '@/lib/use-action-key';
 import { useBillStore } from '@/store/bill-store';
-import { useOrderStore } from '@/store/order-store';
 
 export default function PaymentCash() {
+  const { t } = useTranslation();
   const router = useRouter();
-  const active = useOrderStore((s) => s.active);
-  const items = useOrderStore((s) => s.sentLines);
-  const bill = useBillStore();
-  const pay = usePay();
+  const billId = useBillStore((s) => s.billId);
+  const setLastPaymentId = useBillStore((s) => s.setLastPaymentId);
+  const bill = useBill(billId ?? undefined);
+  const start = useStartPayment();
+  const action = useActionKey();
+  const [clientRef] = useState(newId);
   const [raw, setRaw] = useState('');
 
-  if (!active || items.length === 0) return <Redirect href="/(app)/cart" />;
-
-  const total = calcTotal(items, {
-    voucher: bill.voucher ?? undefined,
-    tip: bill.tip,
-    discount: bill.discount,
-    service: bill.service,
-  }).total;
+  if (!billId) return <Redirect href="/(app)/payment" />;
+  const b = bill.data;
+  const due = b ? b.total - b.paidAmount : 0;
 
   const tendered = Number(raw || 0);
-  const change = tendered - total;
-  const enough = tendered >= total;
+  const change = tendered - due;
+  const enough = !!b && tendered >= due;
 
   const confirm = () => {
-    bill.setTendered(tendered);
-    pay.mutate(
-      { billId: `b${active.orderId}`, method: 'cash', meta: { tendered } },
+    start.mutate(
+      { idempotencyKey: action.key(), billId, clientRef, method: 'CASH', amount: due, tendered },
       {
-        onSuccess: () => router.replace('/(app)/payment/success'),
-        onError: (e) => toast.error('Lỗi thanh toán', (e as Error).message),
+        onSuccess: (p) => {
+          action.reset();
+          setLastPaymentId(p.id);
+          router.replace('/(app)/payment/success');
+        },
+        onError: (e) => {
+          action.settle(e);
+          if (handleShiftRequired(e, t, () => router.push('/(app)/shift'))) return;
+          toast.error(t('payment.error'), (e as Error).message);
+        },
       }
     );
   };
@@ -54,21 +62,21 @@ export default function PaymentCash() {
         <Pressable onPress={() => router.back()} className="mr-2 h-10 w-10 items-center justify-center rounded-full bg-surface active:opacity-70">
           <ChevronLeft size={22} color={color.text.primary} />
         </Pressable>
-        <Text className="text-xl font-extrabold text-fg">Tiền mặt</Text>
+        <Text className="text-xl font-extrabold text-fg">{t('payment.cash')}</Text>
       </View>
 
       <View className="px-4">
         <View className="rounded-2xl border border-line bg-surface p-4">
           <View className="flex-row justify-between">
-            <Text className="text-muted">Cần thu</Text>
-            <Text className="font-bold text-fg">{formatMoney(total)}</Text>
+            <Text className="text-muted">{t('payment.due')}</Text>
+            <Text className="font-bold text-fg">{formatMoney(due)}</Text>
           </View>
           <View className="mt-2 flex-row justify-between">
-            <Text className="text-muted">Khách đưa</Text>
+            <Text className="text-muted">{t('payment.tendered')}</Text>
             <Text className="text-2xl font-extrabold text-brand">{formatMoney(tendered)}</Text>
           </View>
           <View className="mt-2 flex-row justify-between border-t border-line pt-2">
-            <Text className="font-bold text-fg">Tiền thối</Text>
+            <Text className="font-bold text-fg">{t('payment.change')}</Text>
             <Text className={`text-lg font-extrabold ${change < 0 ? 'text-muted' : 'text-fg'}`}>
               {change >= 0 ? formatMoney(change) : '—'}
             </Text>
@@ -78,13 +86,13 @@ export default function PaymentCash() {
         {/* Đúng tiền + gợi ý mệnh giá */}
         <View className="mt-3 flex-row flex-wrap gap-2">
           <Pressable
-            onPress={() => { haptics.light(); setRaw(String(total)); }}
+            onPress={() => { haptics.light(); setRaw(String(due)); }}
             className="flex-row items-center rounded-full border border-brand bg-brand px-4 py-2 active:opacity-80"
           >
             <Check size={16} color="#fff" />
-            <Text className="ml-1.5 font-bold text-white">Đúng tiền</Text>
+            <Text className="ml-1.5 font-bold text-white">{t('payment.exact')}</Text>
           </Pressable>
-          {cashSuggestions(total).map((s) => (
+          {cashSuggestions(due).map((s) => (
             <Pressable key={s} onPress={() => { haptics.light(); setRaw(String(s)); }} className="rounded-full border border-line bg-surface px-4 py-2 active:opacity-70">
               <Text className="font-semibold text-fg">{formatMoney(s)}</Text>
             </Pressable>
@@ -94,7 +102,7 @@ export default function PaymentCash() {
 
       <View className="mt-3 flex-1 justify-end px-4 pb-4">
         <NumericKeypad value={raw} onChange={setRaw} />
-        <Button className="mt-2" label={`Xác nhận · thối ${change >= 0 ? formatMoney(change) : '—'}`} disabled={!enough} loading={pay.isPending} onPress={confirm} />
+        <Button className="mt-2" label={t('payment.confirmChange', { amount: change >= 0 ? formatMoney(change) : '—' })} disabled={!enough} loading={start.isPending} onPress={confirm} />
       </View>
     </SafeAreaView>
   );

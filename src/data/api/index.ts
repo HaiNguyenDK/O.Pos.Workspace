@@ -1,20 +1,16 @@
-// src/data/api/index.ts — chọn impl theo EXPO_PUBLIC_API_MODE (mock | graphql | rest).
-// v1 chỉ có mock. graphqlPosApi/restPosApi thêm ở Sprint 5 (cùng interface, không sửa màn nào).
+// src/data/api/index.ts — chọn impl theo EXPO_PUBLIC_API_MODE (mock | graphql).
+// graphql = BE passiontech cho phần đã có (menu, chi nhánh), phần còn lại tạm mock — xem data/api/graphql.ts.
+import { apiConfig } from '@/data/api/config';
+import { graphqlPosApi } from '@/data/api/graphql';
 import { mockPosApi } from '@/data/api/mock';
 import type { PosApi } from '@/data/api/PosApi';
 
-const mode = process.env.EXPO_PUBLIC_API_MODE ?? 'mock';
-
 function resolveApi(): PosApi {
-  switch (mode) {
-    case 'graphql':
-    case 'rest':
-      // TODO (Sprint 5): implement cùng interface PosApi.
-      console.warn(`[PosApi] API_MODE="${mode}" chưa implement — dùng mock.`);
-      return mockPosApi;
-    default:
-      return mockPosApi;
+  if (apiConfig.mode === 'graphql') {
+    if (!apiConfig.graphqlUrl) console.warn('[PosApi] API_MODE=graphql nhưng thiếu EXPO_PUBLIC_GRAPHQL_URL — dùng mock.');
+    else return graphqlPosApi;
   }
+  return mockPosApi;
 }
 
 export const api: PosApi = resolveApi();

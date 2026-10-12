@@ -8,6 +8,7 @@ import { Text, View } from '@/tw';
 import { PinKeypad } from '@/components/ui/pin-keypad';
 import { useAuthStore } from '@/store/auth-store';
 import { useSettingsStore } from '@/store/settings-store';
+import { isPosApiError } from '@/data/types';
 
 export default function PinLogin() {
   const { t } = useTranslation();
@@ -16,6 +17,7 @@ export default function PinLogin() {
   const hapticsEnabled = useSettingsStore((s) => s.hapticsEnabled);
   const [pin, setPin] = useState('');
   const [error, setError] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -23,7 +25,8 @@ export default function PinLogin() {
     setBusy(true);
     loginWithPin(pin)
       .then(() => router.replace('/(app)/home'))
-      .catch(() => {
+      .catch((e) => {
+        setMessage(isPosApiError(e) && e.code !== 'UNAUTHENTICATED' ? e.message : null);
         setError(true);
         if (hapticsEnabled) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         setTimeout(() => {
@@ -39,7 +42,7 @@ export default function PinLogin() {
       <View className="flex-1 items-center justify-center px-6">
         <Text className="text-3xl font-extrabold text-brand">{t('appName')}</Text>
         <Text className="mb-10 mt-2 text-base text-muted">
-          {error ? t('pin.wrong') : `${t('pin.title')} · ${t('pin.hint')}`}
+          {message ?? (error ? t('pin.wrong') : `${t('pin.title')} · ${t('pin.hint')}`)}
         </Text>
         <PinKeypad value={pin} onChange={setPin} error={error} />
       </View>
