@@ -1,6 +1,8 @@
-// Kích hoạt máy (chế độ graphql): quản lý đăng nhập portal 1 lần → chọn tenant → chọn chi nhánh.
-// Tạm thời thay cho /auth/pos/terminal/activate (pos-be-api-request 3.3). Sau bước này mới tới màn PIN.
-import { useRouter } from 'expo-router';
+// Thiết lập máy (1 lần, chế độ graphql): quản lý đăng nhập portal → chọn tenant → chọn chi nhánh.
+// Tạm thời thay cho /auth/pos/terminal/activate (pos-be-api-request 3.3). Xong thì về màn PIN.
+// `?reset=1` (từ màn PIN "Thiết lập lại máy"): bắt đầu lại từ đăng nhập, giữ phiên cũ tới khi chọn chi nhánh mới,
+// có nút quay lại màn PIN.
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
@@ -16,19 +18,21 @@ import { useTerminalStore } from '@/store/terminal-store';
 import { Pressable, Text, View } from '@/tw';
 
 type Step = 'login' | 'tenant' | 'branch';
+const STEP_NO: Record<Step, number> = { login: 1, tenant: 2, branch: 3 };
 
 const errorText = (e: unknown) => (isPosApiError(e) || e instanceof Error ? e.message : String(e));
 
 export default function Activate() {
   const { t } = useTranslation();
   const router = useRouter();
+  const reset = useLocalSearchParams<{ reset?: string }>().reset === '1';
   const session = useTerminalStore((s) => s.session);
   const setSession = useTerminalStore((s) => s.setSession);
   const setBranch = useTerminalStore((s) => s.setBranch);
   const deactivate = useTerminalStore((s) => s.deactivate);
 
   // Đã có phiên nhưng chưa chọn chi nhánh (vd. tắt app giữa chừng) → vào thẳng bước chi nhánh.
-  const [step, setStep] = useState<Step>(session ? 'branch' : 'login');
+  const [step, setStep] = useState<Step>(session && !reset ? 'branch' : 'login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [preToken, setPreToken] = useState('');
@@ -76,9 +80,10 @@ export default function Activate() {
   };
 
   // Phiên máy nạp muộn (keystore chậm) mà đã có chi nhánh → máy đã kích hoạt, quay về luồng thường.
+  // Thiết lập lại thì không tự quay về (máy vẫn còn chi nhánh cũ cho tới khi chọn chi nhánh mới).
   useEffect(() => {
-    if (session?.branchId) router.replace('/');
-  }, [session?.branchId, router]);
+    if (!reset && session?.branchId) router.replace('/');
+  }, [reset, session?.branchId, router]);
 
   useEffect(() => {
     if (step !== 'branch') return;
@@ -110,7 +115,9 @@ export default function Activate() {
           <View className="items-center">
             <Text className="text-3xl font-extrabold text-brand">{t('appName')}</Text>
             <Text className="mt-2 text-lg font-bold text-fg">{t('terminal.title')}</Text>
-            <Text className="mt-1 text-center text-muted">{t(`terminal.${step}Hint`)}</Text>
+            <Text className="mt-1 text-center text-sm text-muted">{t('terminal.oneTimeNote')}</Text>
+            <Text className="mt-4 text-xs font-semibold uppercase text-brand">{t('terminal.step', { n: STEP_NO[step] })}</Text>
+            <Text className="mt-1 text-center text-fg">{t(`terminal.${step}Hint`)}</Text>
           </View>
 
           {step === 'login' ? (
@@ -163,6 +170,9 @@ export default function Activate() {
           {error ? <Text className="text-center text-cart">{error}</Text> : null}
 
           {step !== 'login' ? <Button variant="ghost" label={t('terminal.restart')} onPress={restart} /> : null}
+          {reset && session?.branchId ? (
+            <Button variant="ghost" label={t('terminal.backToPin')} onPress={() => router.replace('/(auth)/pin-login')} />
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
