@@ -1,10 +1,11 @@
 // src/data/api/be/payments.ts — thanh toán POS trên BE (passiontech-payment). Cờ: `payments`.
-// Schema thật: apps/passiontech-payment/graph/schema.graphqls @ bb3e223c6 —
+// Schema thật: apps/passiontech-payment/graph/schema.graphqls @ 4f4594354 (PR #800) —
 // paymentServiceCreatePosPayment / ConfirmPosPayment / CancelPosPayment, PaymentServicePaymentGqlOutput.
-// ⚠️ Op POS của payment CHƯA lên gateway ogw (be-review Mục 1) — chỉ bật cờ khi BE publish subgraph.
+// Gateway ogw (2026-10-12) đã có 3 op POS nhưng còn là schema trước PR #800 (chưa có roundingAdjustment,
+// idempotencyKey của Confirm/Cancel) → chỉ bật cờ khi BE deploy PR #800 (be-recheck-2026-10-12).
+// Máy thu tiền = header X-Device-Id (graphql-client luôn gửi); BE bỏ qua input.deviceId.
 import { gql } from '@/data/api/graphql-client';
 import type { PosApi } from '@/data/api/PosApi';
-import { getDeviceId } from '@/data/api/session';
 import { currentBranchId, money, opt, optMoney, toPaymentMethod } from '@/data/api/be/common';
 import { PosApiError, type Payment, type PaymentMethod, type PaymentStatus } from '@/data/types';
 
@@ -35,11 +36,13 @@ export type BePayment = {
   qrPayload?: string | null;
   tendered?: number | null;
   change?: number | null;
+  /** CASH: amount đã làm tròn − số tiền yêu cầu; null khi bằng 0. */
+  roundingAdjustment?: number | null;
 };
 
 export const PAYMENT_FIELDS = `
   id amount status vendor paymentMethodType createdAt paidAt expiresAt
-  billId shiftId qrPayload tendered change
+  billId shiftId qrPayload tendered change roundingAdjustment
   transactions { vendorTransactionId }
 `;
 
@@ -55,16 +58,21 @@ export const CREATE_POS_PAYMENT = /* GraphQL */ `
   }
 `;
 
-// ⚠️ BE bug #16 (be-review-2026-10-11): Cancel/Confirm POS payment không nhận idempotencyKey.
+// BE chỉ ghi log idempotencyKey của Cancel/Confirm; retry an toàn nhờ kiểm trạng thái payment.
 export const CANCEL_POS_PAYMENT = /* GraphQL */ `
-  mutation PosCancelPayment($paymentId: ID!) {
-    paymentServiceCancelPosPayment(paymentId: $paymentId) { ${PAYMENT_FIELDS} }
+  mutation PosCancelPayment($paymentId: ID!, $idempotencyKey: ID) {
+    paymentServiceCancelPosPayment(paymentId: $paymentId, idempotencyKey: $idempotencyKey) { ${PAYMENT_FIELDS} }
   }
 `;
 
 export const CONFIRM_POS_PAYMENT = /* GraphQL */ `
-  mutation PosConfirmPayment($paymentId: ID!, $approvalToken: String, $reason: String) {
-    paymentServiceConfirmPosPayment(paymentId: $paymentId, approvalToken: $approvalToken, reason: $reason) { ${PAYMENT_FIELDS} }
+  mutation PosConfirmPayment($paymentId: ID!, $approvalToken: String, $reason: String, $idempotencyKey: ID) {
+    paymentServiceConfirmPosPayment(
+      paymentId: $paymentId
+      approvalToken: $approvalToken
+      reason: $reason
+      idempotencyKey: $idempotencyKey
+    ) { ${PAYMENT_FIELDS} }
   }
 `;
 
@@ -121,6 +129,7 @@ export function toPayment(p: BePayment, ctx: { billId?: string; clientRef?: stri
     providerRef,
     confirmedBy: method === 'CASH' ? 'STAFF' : status === 'SUCCEEDED' && providerRef ? 'PROVIDER' : undefined,
     shiftId: opt(p.shiftId),
+    roundingAdjustment: optMoney(p.roundingAdjustment),
     createdAt: p.createdAt ?? new Date().toISOString(),
     succeededAt: status === 'SUCCEEDED' ? opt(p.paidAt) : undefined,
   };
@@ -137,10 +146,12 @@ export const bePaymentsApi = {
 
   /**
    * paymentServiceCreatePosPayment: CASH → SUCCESS ngay (có change); VIETQR → method QR, vendor PAYOS, PENDING + qrPayload.
-   * Luôn gửi branchId + deviceId: BE tự tìm ca đang mở của máy theo deviceId (không gửi shiftId).
-   * ⚠️ BE bug #10: không chặn SHIFT_REQUIRED khi máy chưa mở ca (payment không gắn ca) — UI vẫn chặn theo contract.
-   * ⚠️ BE bug #11: không có quy tắc 1 payment PENDING / bill (PAYMENT_PENDING) → có thể thu trùng.
-   * ⚠️ BE bug #12: lỗi 203065–203069 hiện về FE dưới dạng 100003 (VALIDATION, message của BE).
+   * Ca = ca đang mở của máy theo header X-Device-Id (không gửi shiftId) → chưa mở ca: SHIFT_REQUIRED (212715);
+   * bill đã có payment PENDING: PAYMENT_PENDING (212717). CASH có thể bị làm tròn: `amount` trả về là số đã làm tròn,
+   * `change` tính theo số đó, chênh lệch ở `roundingAdjustment`.
+   * ⚠️ BE-61 (be-recheck-2026-10-12): BE tin `branchId` của input → luôn gửi chi nhánh của máy, không gửi rỗng.
+   * ⚠️ BE-64: 2 lần thu CASH sát nhau vẫn có thể cùng qua; lần đua thua có thể trả lỗi SQL thô (VALIDATION).
+   *   UI giữ khoá nút + idempotencyKey theo bill.
    */
   async startPayment(input) {
     const ctx = { billId: input.billId, clientRef: input.clientRef, method: input.method };
@@ -155,7 +166,6 @@ export const bePaymentsApi = {
         // Với method CASH phải gửi vendor CASH (BE lấy vendor input nếu có — graphql_payment.go CreatePosPayment).
         vendor: cash ? 'CASH' : VIETQR_VENDOR,
         branchId: currentBranchId(),
-        deviceId: getDeviceId() || undefined,
         tendered: cash ? (input.tendered ?? input.amount) : undefined,
         description: input.clientRef,
       },
@@ -167,20 +177,22 @@ export const bePaymentsApi = {
   async cancelPayment(input) {
     const data = await gql<{ paymentServiceCancelPosPayment: BePayment | null }>(CANCEL_POS_PAYMENT, {
       paymentId: input.paymentId,
+      idempotencyKey: input.idempotencyKey,
     });
     if (!data.paymentServiceCancelPosPayment) throw new PosApiError('NOT_FOUND', 'Không tìm thấy giao dịch');
     return toPayment(data.paymentServiceCancelPosPayment);
   },
 
   /**
-   * ⚠️ BE bug #13: approval token bị tiêu TRƯỚC khi kiểm trạng thái payment — retry/nhầm trạng thái làm mất token
-   * (UI phải xin duyệt lại). ⚠️ Bảo mật #4: payment không kiểm action/branch của approval.
+   * OWNER/MANAGER xác nhận không cần approval; CASHIER/WAITER cần approvalToken action CONFIRM_PAYMENT.
+   * BE kiểm payment PENDING trước rồi mới tiêu token (BE-32).
    */
   async confirmPaymentManually(input) {
     const data = await gql<{ paymentServiceConfirmPosPayment: BePayment | null }>(CONFIRM_POS_PAYMENT, {
       paymentId: input.paymentId,
       approvalToken: input.approvalToken,
       reason: input.reason,
+      idempotencyKey: input.idempotencyKey,
     });
     if (!data.paymentServiceConfirmPosPayment) throw new PosApiError('NOT_FOUND', 'Không tìm thấy giao dịch');
     // Xác nhận tay → confirmedBy STAFF (BE ghi event MANUAL_UPDATE).

@@ -103,8 +103,8 @@ async function persistDeviceId(id: string) {
  * Kích hoạt máy bằng mã quản lý tạo trên dashboard (POST /api/v1/pos/auth/terminal/activate, header X-Tenant-Id,
  * body { activationCode }) → { deviceId, deviceToken }. Máy dùng deviceId của server (X-Device-Id từ nay về sau)
  * và lưu deviceToken làm `deviceSecret`. Giữ token portal / chi nhánh nếu máy đã kích hoạt bằng portal trước đó.
- * ⚠️ BE chưa trả branchId của terminal trong kết quả activate → pin-login cần branchId lấy từ `opts.branch`,
- *    phiên cũ, hoặc EXPO_PUBLIC_BRANCH_ID. ⚠️ Bảo mật #2 (be-review-2026-10-11): mã kích hoạt không hết hạn.
+ * ⚠️ BE-48 (chưa sửa ở PR #800): activate chưa trả branchId → pin-login cần branchId lấy từ `opts.branch`,
+ *    phiên cũ, hoặc EXPO_PUBLIC_BRANCH_ID. Mã kích hoạt hết hạn sau 15 phút, dùng 1 lần (sai/hết hạn → 40102).
  * Lưu ý: token portal cũ gắn deviceIdHash của id máy CŨ → sau khi đổi sang id server có thể bị DEVICE_MISMATCH;
  * luồng này dành cho cờ `pin` (GraphQL dùng staffJwt gắn id máy mới).
  */

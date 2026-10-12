@@ -30,7 +30,7 @@ export function currentTenantId(): string {
   return id;
 }
 
-/** BE: PosServiceStaffRef { id name } (restaurant) — name có thể là email/id (⚠️ BE bug #19). */
+/** BE: PosServiceStaffRef { id name } (restaurant) — ⚠️ BE-39 (chưa sửa): name vẫn có thể là email/id. */
 export type BeStaffRef = { id: string; name?: string | null };
 export const toStaffRef = (s: BeStaffRef): StaffRef => ({ id: s.id, name: s.name ?? '' });
 

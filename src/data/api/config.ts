@@ -4,7 +4,7 @@
 export type ApiMode = 'mock' | 'graphql';
 
 /**
- * Nhóm API BE (shape thật theo BE @ bb3e223c6 — docs/pos/be-review-2026-10-11.md). Chế độ graphql: nhóm nào bật
+ * Nhóm API BE (shape thật theo BE @ 4f4594354 — docs/pos/be-recheck-2026-10-12.md). Chế độ graphql: nhóm nào bật
  * thì gọi BE thật, nhóm nào tắt thì chạy mock — BE deploy nhóm nào chỉ cần thêm tên nhóm vào EXPO_PUBLIC_BE_FEATURES.
  * - `menu-v2`: getMenu dùng productServiceMenu (modifierGroups, station, priceVnd) thay vì SearchProducts.
  * - `branch-settings`: me() đọc Branch.phoneNumber + settings (VAT, phí phục vụ, làm tròn) từ entity.

@@ -1,6 +1,6 @@
 // src/data/api/errors.ts — ánh xạ mã lỗi BE → mã contract (pos-plan Mục 3.2).
 // Dùng chung cho GraphQL (extensions.code) và REST (body.code).
-// Nguồn: BE @ bb3e223c6 — restaurant internal/errcode/codes.go, payment internal/ecode/payment_errors.go,
+// Nguồn: BE @ 4f4594354 (PR #800) — restaurant internal/errcode/codes.go, payment internal/ecode/payment_errors.go,
 // staff internal/errcode/codes.go, auth internal/handler/pos_auth_handler.go (handleError).
 import type { PosErrorCode } from '@/data/types';
 
@@ -9,9 +9,9 @@ const KNOWN_CODES: Record<number, PosErrorCode> = {
   // REST auth POS (pos_auth_handler.go handleError)
   40101: 'UNAUTHENTICATED', // sai PIN / sai thông tin máy
   40301: 'FORBIDDEN', // không đủ quyền (approve: người nhập PIN không phải MANAGER/OWNER)
+  40102: 'UNAUTHENTICATED', // mã kích hoạt sai / hết hạn (15 phút) / đã dùng
   42301: 'FORBIDDEN', // khoá 15 phút do sai PIN 5 lần
-  // ⚠️ BE bug #12 (be-review-2026-10-11): lỗi payment 203065–203069 hiện bị che thành 100003 "internal error".
-  // Giữ VALIDATION và để nguyên message BE trả (graphql-client chuyển e.message vào PosApiError).
+  // Lỗi nội bộ còn lại (DAO, gRPC…) — payment 2030xx đã giữ mã nghiệp vụ (BE-30). Giữ VALIDATION + message BE.
   100003: 'VALIDATION',
   // Auth module (errx/codes_core.go)
   200201: 'UNAUTHENTICATED',
@@ -73,6 +73,7 @@ const REASONS: Record<number, string> = {
   215103: 'STAFF_INACTIVE',
   215104: 'PIN_INVALID',
   42301: 'PIN_LOCKED',
+  40102: 'ACTIVATION_CODE_INVALID',
 };
 
 /** Tên mã trong contract — BE có thể trả thẳng tên thay vì số (vd 'VERSION_CONFLICT'). */

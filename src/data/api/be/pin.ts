@@ -1,5 +1,5 @@
 // src/data/api/be/pin.ts — PIN nhân viên trên máy dùng chung (passiontech-auth). Cờ: `pin`.
-// BE @ bb3e223c6: POST /api/v1/pos/auth/pin-login, header X-Tenant-Id, body { deviceId, deviceToken, branchId, pin }
+// BE @ 4f4594354: POST /api/v1/pos/auth/pin-login, header X-Tenant-Id, body { deviceId, deviceToken, branchId, pin }
 // → { code: 0, message, data: { staffJwt, staffCtx: { StaffID, Name, Role, BranchID } } } (staffCtx không có json tag → PascalCase).
 // Không có refresh token: hết hạn (exp trong JWT) → app đưa về màn PIN.
 // ⚠️ Route /api/v1/pos/auth/* đang bị edge ogw chặn 401 (be-review Mục 5) — chưa đăng nhập PIN được trên môi trường thật.

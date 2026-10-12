@@ -1,5 +1,5 @@
 // src/data/api/be/orders.ts — bàn + đơn tại bàn trên BE (passiontech-restaurant). Cờ: `orders`.
-// Schema thật: apps/passiontech-restaurant/internal/handler/graphql/{table,pos_order}.graphqls @ bb3e223c6.
+// Schema thật: apps/passiontech-restaurant/internal/handler/graphql/{table,pos_order}.graphqls @ 4f4594354 (PR #800).
 import { gql } from '@/data/api/graphql-client';
 import type { PosApi } from '@/data/api/PosApi';
 import { currentBranchId, money, opt, type BeStaffRef } from '@/data/api/be/common';
@@ -8,6 +8,7 @@ import {
   PosApiError,
   type DiningTable,
   type LineStatus,
+  type NewLineInput,
   type Order,
   type OrderLine,
   type OrderStatus,
@@ -39,6 +40,8 @@ type BeVoidInfo = { reason: string; by: BeStaffRef; at: string };
 export type BePosOrderLine = {
   id: string;
   menuItemId: string;
+  /** SKU của variant (món nhiều size). */
+  variantId?: string | null;
   name: string;
   unitPrice: number;
   modifiers?: BeLineModifier[] | null;
@@ -77,7 +80,7 @@ export const ORDER_FIELDS = `
   id code branchId tableId tableName customerName note mode guests status version mergedIntoOrderId createdAt updatedAt
   openedBy { id name }
   lines {
-    id menuItemId name unitPrice quantity note lineTotal status firedAt
+    id menuItemId variantId name unitPrice quantity note lineTotal status firedAt
     modifiers { optionId name priceDelta }
     voided { reason at by { id name } }
   }
@@ -193,14 +196,41 @@ export function toOrder(o: BePosOrder): Order {
   };
 }
 
+/** Tiền tố id option "size" do toMenuItemV2 sinh từ variant (SKU). */
+export const VARIANT_OPTION_PREFIX = 'sku:';
+
+/** NewLineInput (contract) → RestaurantServiceOrderLineInput: tách option `sku:<sku>` thành variantId. */
+export function toBeNewLine(l: NewLineInput) {
+  const variant = l.modifierOptionIds.find((id) => id.startsWith(VARIANT_OPTION_PREFIX));
+  return {
+    lineId: l.lineId,
+    menuItemId: l.menuItemId,
+    variantId: variant ? variant.slice(VARIANT_OPTION_PREFIX.length) : undefined,
+    quantity: l.quantity,
+    modifierOptionIds: l.modifierOptionIds.filter((id) => !id.startsWith(VARIANT_OPTION_PREFIX)),
+    note: l.note,
+  };
+}
+
 async function fetchOrder(orderId: string): Promise<Order | null> {
   const data = await gql<{ restaurantServicePosOrder: BePosOrder | null }>(ORDER_QUERY, { id: orderId });
   return data.restaurantServicePosOrder ? toOrder(data.restaurantServicePosOrder) : null;
 }
 
+/** extensions.order của VERSION_CONFLICT (BE-46) — cùng shape PosServicePosOrder; thiếu/không hợp lệ → null. */
+export function conflictOrderOf(data: unknown): Order | null {
+  const o = (data as { order?: unknown } | undefined)?.order as BePosOrder | undefined;
+  if (!o || typeof o !== 'object' || typeof o.id !== 'string' || typeof o.version !== 'number' || !o.openedBy) return null;
+  try {
+    return toOrder(o);
+  } catch {
+    return null;
+  }
+}
+
 /**
- * VERSION_CONFLICT (212702) của BE chỉ kèm `latestVersion` (⚠️ BE bug #17 be-review-2026-10-11) → đọc lại
- * restaurantServicePosOrder để đưa đơn mới nhất vào `data.order` như mock/contract. `candidates`: các đơn có thể
+ * VERSION_CONFLICT (212702): BE (PR #800) kèm `extensions.order` = đơn mới nhất → đưa vào `data.order` như mock/contract.
+ * Không có (gateway cũ, hoặc lỗi là của đơn khác) → đọc lại restaurantServicePosOrder. `candidates`: các đơn có thể
  * lệch version kèm version client đang giữ; chọn đơn đầu tiên đã đổi version, không xác định được thì lấy đơn cuối danh sách.
  * Đọc lại lỗi → ném lỗi gốc (vẫn có latestVersion).
  */
@@ -208,7 +238,10 @@ export async function withConflictOrder<T>(p: Promise<T>, candidates: { id: stri
   try {
     return await p;
   } catch (e) {
-    if (!isPosApiError(e) || e.code !== 'VERSION_CONFLICT' || candidates.length === 0) throw e;
+    if (!isPosApiError(e) || e.code !== 'VERSION_CONFLICT') throw e;
+    const attached = conflictOrderOf(e.data);
+    if (attached) throw new PosApiError(e.code, e.message, { ...e.data, order: attached });
+    if (candidates.length === 0) throw e;
     let order: Order | null = null;
     try {
       const fresh = await Promise.all(candidates.map((c) => fetchOrder(c.id)));
@@ -266,26 +299,24 @@ export const beOrdersApi = {
     return toOrder(data.restaurantServiceOpenOrder);
   },
 
-  // ⚠️ BE bug #3 (be-review-2026-10-11): thêm/huỷ món khi đơn BILLING không huỷ/tính lại bill OPEN cũ.
-  // ⚠️ BE bug #4: món nhiều variant chỉ lấy variant đầu; option id lạ được nhận với 0đ.
+  /**
+   * Món nhiều size: menu-v2 đưa size thành nhóm "Loại" với option id `sku:<sku>` (graphql.ts) → tách ra `variantId`,
+   * phần còn lại là modifierOptionIds thật. BE từ chối option lạ / sai min-max (VALIDATION) và tự huỷ bill OPEN cũ
+   * khi đơn đang BILLING; đơn đã có bill PAID/đang chờ thanh toán → ORDER_LOCKED.
+   * ⚠️ BE-66 (be-recheck-2026-10-12): lỗi tạo phiếu bếp sau khi lưu đơn → retry báo thành công nhưng món không xuống bếp.
+   */
   async addLines(input) {
     const data = await gql<{ restaurantServiceAddLines: BePosOrder }>(ADD_LINES, {
       input: {
         idempotencyKey: input.idempotencyKey,
         orderId: input.orderId,
-        lines: input.lines.map((l) => ({
-          lineId: l.lineId,
-          menuItemId: l.menuItemId,
-          quantity: l.quantity,
-          modifierOptionIds: l.modifierOptionIds,
-          note: l.note,
-        })),
+        lines: input.lines.map(toBeNewLine),
       },
     });
     return toOrder(data.restaurantServiceAddLines);
   },
 
-  // ⚠️ BE bug #16: idempotencyKey được nhận nhưng không dùng — retry sau khi đã huỷ trả lỗi thay vì kết quả cũ.
+  // Retry cùng idempotencyKey trả đơn hiện tại (BE-34). Approval cần action VOID_LINE.
   // ⚠️ BE bug #18: BE cho huỷ cả món đã SERVED (contract: chỉ trước SERVED) — UI vẫn chặn theo contract.
   async voidLine(input) {
     const data = await gql<{ restaurantServiceVoidLine: BePosOrder }>(VOID_LINE, {
@@ -300,7 +331,7 @@ export const beOrdersApi = {
     return toOrder(data.restaurantServiceVoidLine);
   },
 
-  // ⚠️ BE bug #15: mọi thao tác KDS tăng version đơn → chuyển bàn hay gặp VERSION_CONFLICT. ⚠️ BE bug #16 (idempotency).
+  // ⚠️ BE-62 (be-recheck-2026-10-12): chuyển bàn khi đã chia bill để lại các phần bill cũ OPEN → bàn không được giải phóng.
   async moveOrder(input) {
     const data = await withConflictOrder(
       gql<{ restaurantServiceMoveOrder: BePosOrder }>(MOVE_ORDER, {
@@ -316,7 +347,7 @@ export const beOrdersApi = {
     return toOrder(data.restaurantServiceMoveOrder);
   },
 
-  // ⚠️ BE bug #16 (idempotency key không dùng).
+  // ⚠️ BE-63 (be-recheck-2026-10-12): BE không chặn gộp đơn nguồn đã có bill PAID/đang chờ → có thể thu trùng.
   async mergeOrders(input) {
     const data = await withConflictOrder(
       gql<{ restaurantServiceMergeOrders: BePosOrder }>(MERGE_ORDERS, {

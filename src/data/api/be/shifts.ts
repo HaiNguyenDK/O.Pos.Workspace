@@ -1,5 +1,5 @@
 // src/data/api/be/shifts.ts — ca thu ngân & báo cáo X/Z (passiontech-restaurant). Cờ: `shifts`.
-// Schema thật: apps/passiontech-restaurant/internal/handler/graphql/shift.graphqls @ bb3e223c6.
+// Schema thật: apps/passiontech-restaurant/internal/handler/graphql/shift.graphqls @ 4f4594354 (PR #800).
 // Ca theo máy (X-Device-Id do gql() gắn). Đếm mù: CloseShift chỉ gửi countedCash; expected/variance do server trả.
 import { gql } from '@/data/api/graphql-client';
 import type { PosApi } from '@/data/api/PosApi';
@@ -184,7 +184,8 @@ export function toShiftReport(r: BePosShiftReport): ShiftReport {
       total: money(r.total),
       tips: money(r.tips),
     },
-    // ⚠️ BE bug #10 (be-review-2026-10-11): doanh thu tính theo ca của máy mở đơn, payment theo ca thu tiền → có thể lệch.
+    // Doanh thu theo ca thu tiền (BE-29). ⚠️ BE-68 (be-recheck-2026-10-12): bill trả ở 2 ca bị chia tỷ lệ cắt phần lẻ
+    // (lệch vài đồng), bill trả một phần ở ca đã chốt không vào Z của ca đó, số bill đếm trùng.
     payments: toReportPayments(r.payments),
     voids: { lines: r.voidLines, amount: money(r.voidAmount) },
     cash: {
@@ -216,7 +217,7 @@ export const beShiftsApi = {
     return toShift(data.restaurantServiceOpenShift);
   },
 
-  // ⚠️ BE bug #9: gửi lại (retry cùng idempotencyKey) → panic nil ở BE (lỗi 5xx → hàng đợi offline thử lại tiếp).
+  // Retry cùng idempotencyKey trả bản ghi cũ (BE-33). Chi CASHIER cần approval CASH_OUT.
   async addCashMovement(input) {
     const data = await gql<{ restaurantServiceAddCashMovement: BePosCashMovement }>(ADD_CASH_MOVEMENT, {
       idempotencyKey: input.idempotencyKey,

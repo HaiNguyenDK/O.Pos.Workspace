@@ -1,5 +1,5 @@
 // src/data/api/be/bills.ts — bill & tính tiền trên BE (passiontech-restaurant). Cờ: `bills`.
-// Schema thật: apps/passiontech-restaurant/internal/handler/graphql/pos_bill.graphqls @ bb3e223c6 — server tính tiền (D7).
+// Schema thật: apps/passiontech-restaurant/internal/handler/graphql/pos_bill.graphqls @ 4f4594354 (PR #800) — server tính tiền (D7).
 import { gql } from '@/data/api/graphql-client';
 import type { PosApi } from '@/data/api/PosApi';
 import { currentBranchId, money, opt, toPaymentMethod, type BeStaffRef } from '@/data/api/be/common';
@@ -99,8 +99,8 @@ export const BILLS_QUERY = /* GraphQL */ `
 
 /**
  * Discount BE → contract. type VOUCHER (value = số tiền giảm của voucher) → kind VOUCHER, type AMOUNT.
- * ⚠️ BE bug #8 (be-review-2026-10-11): `amount` luôn = 0 → hoá đơn không hiện tiền giảm từng dòng
- * (discountTotal vẫn đúng). FE không tự tính lại (D7).
+ * `amount` = số tiền giảm thật của dòng (BE-38). Σamount có thể lớn hơn discountTotal (BE không chặn trần) →
+ * tổng tiền dùng discountTotal, không cộng lại từ các dòng (D7).
  */
 export function toDiscount(d: BeDiscount): Discount {
   const voucher = d.type === 'VOUCHER' || !!d.voucherCode;
@@ -157,7 +157,7 @@ export function toBill(b: BePosBill, partsOf?: number): Bill {
     taxRate: b.taxRate,
     tax: money(b.tax),
     tip: money(b.tip),
-    // ⚠️ BE bug #7: làm tròn tiền mặt áp vào mọi bill và không trả phần chênh → các dòng có thể không cộng bằng total.
+    // Bill không làm tròn; làm tròn tiền mặt nằm ở Payment.roundingAdjustment (BE câu hỏi 2, PR #800).
     total: money(b.total),
     paidAmount: money(b.paidAmount),
     status: b.status,
@@ -201,7 +201,7 @@ const matches = (b: BePosBill, q: string) =>
 // ── PosApi ──
 
 export const beBillsApi = {
-  // ⚠️ BE bug #6: không đọc được BranchSettings → BE âm thầm tính VAT 0%.
+  // ⚠️ BE-25 (be-recheck-2026-10-12): chi nhánh chưa có settings (hoặc BE thiếu cấu hình entity) → VAT 0% không báo lỗi.
   async requestBill(input) {
     const data = await withConflictOrder(
       gql<{ restaurantServiceRequestBill: BePosBill }>(REQUEST_BILL, {
@@ -228,8 +228,8 @@ export const beBillsApi = {
     return toBillWithParts(data.restaurantServiceRequestBill);
   },
 
-  // ⚠️ BE bug #2: BY_LINE chia đều mọi khoản thay vì theo món của từng phần (sai tiền từng phần).
-  // ⚠️ BE bug #1: trả 1 phần của bill đã chia → cả đơn PAID và bàn được giải phóng.
+  // BY_LINE: mọi dòng phải được gán, khoản giảm/phí/thuế phân bổ theo subtotal từng phần; EVEN: dư +1đ cho phần cuối.
+  // ⚠️ BE-62 (be-recheck-2026-10-12): chia lại chỉ huỷ phần 0 → các phần 1…N cũ vẫn OPEN, bàn không được giải phóng.
   async splitBill(input) {
     const data = await withConflictOrder(
       gql<{ restaurantServiceSplitBill: BePosBill[] }>(SPLIT_BILL, {

@@ -1,6 +1,6 @@
 // src/data/api/graphql.ts — PosApi trên BE passiontech (GraphQL federation).
 // Menu + chi nhánh luôn gọi BE thật. Các nhóm POS (đơn, bill, thanh toán, duyệt, PIN, ca, thông báo) có adapter
-// theo shape thật của BE @ bb3e223c6 ở data/api/be/* — chỉ gọi thật khi nhóm được bật trong EXPO_PUBLIC_BE_FEATURES,
+// theo shape thật của BE @ 4f4594354 ở data/api/be/* — chỉ gọi thật khi nhóm được bật trong EXPO_PUBLIC_BE_FEATURES,
 // còn lại chạy mock. Xem docs/pos/be-review-2026-10-11.md. BE deploy nhóm nào → bật cờ, không sửa màn hình.
 import { beApprovalsApi } from '@/data/api/be/approvals';
 import { beBillsApi } from '@/data/api/be/bills';
@@ -60,7 +60,7 @@ type BeBranch = { id: string; name: string; address: string; status: string };
 type BeBranchSettings = { taxRate: number; pricesIncludeTax: boolean; serviceChargeRate: number; cashRounding: number };
 type BeBranchV2 = BeBranch & { phoneNumber?: string | null; settings?: BeBranchSettings | null };
 
-/** productServiceMenu (cờ `menu-v2`) — product subgraph @ bb3e223c6. */
+/** productServiceMenu (cờ `menu-v2`) — product subgraph @ 4f4594354 (updatedSince/version = epoch giây). */
 type BeMenuVariant = { name?: string | null; sku: string; priceVnd: number; isEnabled: boolean; isAvailable: boolean };
 type BeModifierGroup = {
   id: string;
@@ -127,7 +127,7 @@ const BRANCH_QUERY = /* GraphQL */ `
   }
 `;
 
-// Cờ `branch-settings`: Branch.phoneNumber + settings (entity @ bb3e223c6) — chưa lên gateway ogw.
+// Cờ `branch-settings`: Branch.phoneNumber + settings (entity @ 4f4594354) — đã lên gateway ogw (2026-10-12).
 export const BRANCH_QUERY_V2 = /* GraphQL */ `
   query PosBranchV2($id: String!) {
     entityServiceBranchById(id: $id) {
@@ -202,33 +202,53 @@ export const toStation = (s: string | null | undefined): Station => {
 
 /**
  * Món của productServiceMenu (cờ `menu-v2`) → MenuItem. Khác bản cũ:
- * - modifierGroups/station lấy từ BE; KHÔNG sinh nhóm "Loại" giả từ variant.
- * - Giá = priceVnd của variant đầu tiên đang bật + còn hàng — đúng variant AddLines của BE tính tiền.
- *   ⚠️ BE bug #4 (be-review-2026-10-11): AddLines chỉ lấy variant đầu → món nhiều size không bán được size khác
- *   (chờ BE trả lời câu hỏi 1: size = modifierGroups hay AddLines nhận variantId).
- *   ⚠️ BE bug #5: AddLines dùng int64(price) (cắt) còn menu trả priceVnd (làm tròn) → có thể lệch 1đ với bill.
+ * - modifierGroups/station lấy từ BE.
+ * - Giá theo priceVnd (BE AddLines tính bằng cùng công thức làm tròn — BE-24).
+ * - Size (BE câu hỏi 1, PR #800): AddLines nhận `variantId` = SKU, bắt buộc khi > 1 variant đang bật.
+ *   Contract không có variant → > 1 variant: nhóm "Loại" (min 1, max 1) đứng đầu, option id `sku:<sku>`,
+ *   giá món = variant rẻ nhất, priceDelta = chênh lệch; be/orders.ts tách option này thành variantId.
+ *   1 variant: không sinh nhóm, BE tự lấy variant đó.
  * - Chỉ món type PRODUCT (type null coi như PRODUCT, giống toCategories) đang bật, chưa xoá, VND.
  */
 export function toMenuItemV2(p: BeMenuProduct, categoryIds: Set<string>): MenuItem | null {
   if (p.isDeleted || !p.isEnabled || (p.type ?? 'PRODUCT') !== 'PRODUCT' || p.currency !== 'VND') return null;
   const enabled = (p.variants ?? []).filter((v) => v.isEnabled);
   if (enabled.length === 0) return null;
-  const sold = enabled.find((v) => v.isAvailable) ?? enabled[0];
+  // Size hết ở chi nhánh không được chọn; hết cả → vẫn liệt kê (món đã isAvailable=false).
+  const sellable = enabled.filter((v) => v.isAvailable);
+  const pool = sellable.length > 0 ? sellable : enabled;
+  const prices = pool.map((v) => Math.round(v.priceVnd));
+  const base = Math.min(...prices);
+  // BE bắt buộc variantId khi > 1 variant đang BẬT (kể cả khi chỉ còn 1 size bán được) → vẫn sinh nhóm.
+  const sizeGroup: ModifierGroup[] =
+    enabled.length > 1
+      ? [
+          {
+            id: `variant:${p.id}`,
+            name: 'Loại',
+            min: 1,
+            max: 1,
+            options: pool.map((v, i) => ({ id: `sku:${v.sku}`, name: v.name || v.sku, priceDelta: prices[i] - base })),
+          },
+        ]
+      : [];
   return {
     id: p.id,
     categoryId: p.categoryIds.find((c) => categoryIds.has(c)) ?? p.categoryIds[0] ?? '',
     name: p.title,
     description: p.shortDescription ?? p.description ?? undefined,
-    price: Math.round(sold.priceVnd),
+    price: base,
     isAvailable: p.isAvailable && enabled.some((v) => v.isAvailable),
     station: toStation(p.station),
-    modifierGroups: (p.modifierGroups ?? []).map((g) => ({
+    modifierGroups: sizeGroup.concat(
+      (p.modifierGroups ?? []).map((g) => ({
       id: g.id,
       name: g.name,
       min: g.min,
       max: g.max,
-      options: g.options.map((o) => ({ id: o.id, name: o.name, priceDelta: Math.round(o.priceDelta) })),
-    })),
+        options: g.options.map((o) => ({ id: o.id, name: o.name, priceDelta: Math.round(o.priceDelta) })),
+      }))
+    ),
     imageUrl: p.thumbnailUrl ?? p.mediaUrls?.[0] ?? undefined,
   };
 }
@@ -354,7 +374,7 @@ export const graphqlPosApi: PosApi = {
           address: b.address,
           phone: b.phoneNumber || undefined,
           // Chi nhánh chưa cấu hình settings → mặc định của app (chỉ để hiển thị/xem trước — tiền thật do server tính).
-          // ⚠️ BE bug #6 (be-review-2026-10-11): khi đó restaurant âm thầm tính VAT 0% → bill có thể khác số app hiển thị.
+          // ⚠️ BE-25 (be-recheck-2026-10-12): khi đó restaurant tính VAT 0% → bill có thể khác số app hiển thị.
           settings: b.settings
             ? {
                 taxRate: b.settings.taxRate,

@@ -139,6 +139,8 @@ export type Payment = {
   approvedBy?: string;
   /** Ca đang mở của máy lúc tạo payment (Mục 3.7) — PENDING xác nhận sau vẫn tính vào ca này. */
   shiftId?: string;
+  /** Làm tròn tiền mặt (BE PR #800): amount = số đã làm tròn, roundingAdjustment = amount − số tiền yêu cầu. Chỉ có ở CASH. */
+  roundingAdjustment?: Money;
   createdAt: string;
   succeededAt?: string;
 };
