@@ -43,7 +43,7 @@ export default function PaymentQr() {
   const [paymentId, setPaymentId] = useState<string | null>(null);
   const payment = usePayment(paymentId ?? undefined);
   const p = payment.data;
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const leaving = useRef(false);
 
   const due = bill.data ? bill.data.total - bill.data.paidAmount : 0;
@@ -90,7 +90,9 @@ export default function PaymentQr() {
 
   // Rời màn khi còn chờ → huỷ để có thể đổi phương thức.
   const latest = useRef(p);
-  latest.current = p;
+  useEffect(() => {
+    latest.current = p;
+  }, [p]);
   useEffect(
     () => () => {
       const cur = latest.current;
