@@ -4,7 +4,7 @@
 import { apiConfig } from '@/data/api/config';
 import { apiSession, getDeviceId, setDeviceId } from '@/data/api/session';
 import { refreshTerminal, terminalAccessToken, terminalSession } from '@/data/api/terminal';
-import { errorExtras, mapErrorCode } from '@/data/api/errors';
+import { errorExtras, isTransientErrorCode, mapErrorCode } from '@/data/api/errors';
 import { isPosApiError, PosApiError } from '@/data/types';
 
 /** Bảng mã lỗi BE → contract: data/api/errors.ts (giữ export cũ cho nơi đang import từ đây). */
@@ -46,6 +46,8 @@ async function send<T>(query: string, variables: Record<string, unknown> | undef
     const e = body.errors[0];
     // Giữ extensions (vd currentOrderId của TABLE_OCCUPIED, latestVersion của VERSION_CONFLICT).
     const { code, ...ext } = e.extensions ?? {};
+    // Subgraph không gọi được / dịch vụ tạm lỗi → như mất mạng (thử lại được), không phải lỗi nghiệp vụ.
+    if (isTransientErrorCode(code)) throw new Error(`Máy chủ tạm lỗi (${String(code)})`);
     throw new PosApiError(mapErrorCode(code), e.message, { ...errorExtras(code), ...ext, beCode: code });
   }
   if (!body.data) throw new Error('Phản hồi rỗng từ máy chủ');

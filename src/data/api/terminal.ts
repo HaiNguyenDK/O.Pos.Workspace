@@ -88,7 +88,7 @@ export async function terminalSelectTenant(preToken: string, tenantId: string, e
   return session;
 }
 
-type ActivateResponse = { deviceId: string; deviceToken: string };
+type ActivateResponse = { deviceId: string; deviceToken: string; branchId?: string };
 
 /** Ghi id máy do server cấp vào SecureStore (cùng khoá lib/device đọc lúc khởi động). Lỗi lưu không chặn kích hoạt. */
 async function persistDeviceId(id: string) {
@@ -101,12 +101,12 @@ async function persistDeviceId(id: string) {
 
 /**
  * Kích hoạt máy bằng mã quản lý tạo trên dashboard (POST /api/v1/pos/auth/terminal/activate, header X-Tenant-Id,
- * body { activationCode }) → { deviceId, deviceToken }. Máy dùng deviceId của server (X-Device-Id từ nay về sau)
- * và lưu deviceToken làm `deviceSecret`. Giữ token portal / chi nhánh nếu máy đã kích hoạt bằng portal trước đó.
- * ⚠️ BE-48 (chưa sửa ở PR #800): activate chưa trả branchId → pin-login cần branchId lấy từ `opts.branch`,
- *    phiên cũ, hoặc EXPO_PUBLIC_BRANCH_ID. Mã kích hoạt hết hạn sau 15 phút, dùng 1 lần (sai/hết hạn → 40102).
- * Lưu ý: token portal cũ gắn deviceIdHash của id máy CŨ → sau khi đổi sang id server có thể bị DEVICE_MISMATCH;
- * luồng này dành cho cờ `pin` (GraphQL dùng staffJwt gắn id máy mới).
+ * body { activationCode }) → { deviceId, deviceToken, branchId } (BE-48 @ 0fca3b033). Máy dùng deviceId của server
+ * (X-Device-Id từ nay về sau), lưu deviceToken làm `deviceSecret` và chi nhánh của máy theo BE (pin-login cần branchId).
+ * BE không trả tên chi nhánh → lấy `opts.branch.name` nếu cùng id, không thì để trống (màn PIN hiện "chưa có tên").
+ * Mã kích hoạt hết hạn sau 15 phút, dùng 1 lần (sai/hết hạn → 40102).
+ * Lưu ý: token portal cũ gắn deviceIdHash của id máy CŨ → sau khi đổi sang id server sẽ bị 401 DEVICE_MISMATCH
+ * (BE @ b3af6c090 luôn kiểm) → bỏ token portal cũ; GraphQL dùng staffJwt (cờ `pin`) gắn id máy mới.
  */
 export async function activateWithCode(
   tenantId: string,
@@ -123,14 +123,18 @@ export async function activateWithCode(
   setDeviceId(res.deviceId);
   await persistDeviceId(res.deviceId);
   const prev = current && current.tenantId === tenantId ? current : null;
+  // Chi nhánh của máy: BE quyết (terminal đăng ký theo chi nhánh); BE cũ chưa trả → như trước.
+  const branchId = res.branchId || opts.branch?.id || prev?.branchId;
+  const nameOf = (b?: { id?: string; name?: string } | null) => (b && b.id === branchId ? b.name : undefined);
   const session: TerminalSession = {
-    accessToken: prev?.accessToken ?? '',
-    refreshToken: prev?.refreshToken ?? '',
-    expiresAt: prev?.expiresAt ?? new Date(0).toISOString(),
+    // Token portal cũ gắn id máy cũ → không dùng được với id server (DEVICE_MISMATCH).
+    accessToken: '',
+    refreshToken: '',
+    expiresAt: new Date(0).toISOString(),
     tenantId,
     email: prev?.email ?? '',
-    branchId: opts.branch?.id ?? prev?.branchId,
-    branchName: opts.branch?.name ?? prev?.branchName,
+    branchId,
+    branchName: nameOf(opts.branch) ?? nameOf(prev ? { id: prev.branchId, name: prev.branchName } : null),
     deviceSecret: res.deviceToken,
   };
   await terminalSession.save(session);
