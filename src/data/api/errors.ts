@@ -42,10 +42,11 @@ const KNOWN_CODES: Record<number, PosErrorCode> = {
   212717: 'PAYMENT_PENDING',
   212718: 'NOT_FOUND', // bàn
   212719: 'VALIDATION', // kế hoạch chia bill không hợp lệ
+  212720: 'VALIDATION', // chi nhánh chưa cấu hình thuế/phí (BRANCH_SETTINGS_MISSING) — RequestBill/SplitBill
   // Payment POS — HCode(30) = 203000
   203065: 'VALIDATION', // bill không thu được (đã trả / sai số tiền)
   203066: 'SHIFT_REQUIRED', // ca đã đóng hoặc không có
-  203067: 'VALIDATION', // payment không còn PENDING
+  203067: 'VALIDATION', // payment không còn PENDING; tạo lại cùng key sau lần CANCELLED/FAILED/EXPIRED → phải sinh key mới
   203068: 'VALIDATION', // tiền khách đưa < số tiền
   203069: 'APPROVAL_REQUIRED',
   // Staff POS — HCode(151) = 215100
@@ -66,6 +67,7 @@ const REASONS: Record<number, string> = {
   212712: 'APPROVAL_INVALID',
   212716: 'SHIFT_CLOSED',
   212719: 'SPLIT_INVALID',
+  212720: 'BRANCH_SETTINGS_MISSING',
   203065: 'BILL_NOT_PAYABLE',
   203067: 'PAYMENT_NOT_PENDING',
   203068: 'INVALID_TENDERED',
@@ -132,6 +134,21 @@ export function lookupErrorCode(code: unknown): PosErrorCode | undefined {
 
 export function mapErrorCode(code: unknown): PosErrorCode {
   return lookupErrorCode(code) ?? 'VALIDATION';
+}
+
+/**
+ * Lỗi hạ tầng tạm thời — coi như mất mạng (Error thường, hàng đợi offline / người dùng thử lại cùng idempotency key),
+ * không phải lỗi nghiệp vụ:
+ * - SUBREQUEST_HTTP_ERROR: gateway không gọi được subgraph (vd restaurant lỗi DNS — BE-06).
+ * - 100013 / SERVICE_UNAVAILABLE: dịch vụ phía sau tạm lỗi — payment + restaurant thống nhất từ BE @ 2a8d4cfe8
+ *   (100020 giờ là OutOfRange → lỗi dữ liệu, KHÔNG thử lại).
+ * - 203004: payment không đọc được danh sách payment của bill (fail-closed, BE-64).
+ */
+const TRANSIENT_CODES = new Set<string>(['SUBREQUEST_HTTP_ERROR', 'SERVICE_UNAVAILABLE', '100013', '203004']);
+
+export function isTransientErrorCode(code: unknown): boolean {
+  if (code === null || code === undefined) return false;
+  return TRANSIENT_CODES.has(String(code).trim().toUpperCase());
 }
 
 /** Dữ liệu thêm cho PosApiError.data theo mã BE (hiện chỉ `reason`). */
